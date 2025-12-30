@@ -26,7 +26,7 @@ class MediaRequestHandler(BaseHTTPRequestHandler):
     db = None
 
     def log_message(self, fmt, *args):
-        logging.info("%s - %s", self.address_string(), fmt % args)
+        logging.getLogger("access").debug("%s - %s", self.address_string(), fmt % args)
 
     def do_GET(self):
         parsed = urlparse(self.path)

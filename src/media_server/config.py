@@ -18,6 +18,7 @@ class ServerConfig:
     storage_sts_policy: str
     storage_sts_duration: int
     db_path: str
+    log_level: str
 
 
 def parse_args():
@@ -36,6 +37,7 @@ def parse_args():
     parser.add_argument("--storage-sts-policy", default="", help="MinIO STS policy JSON")
     parser.add_argument("--storage-sts-duration", type=int, default=3600, help="MinIO STS duration seconds")
     parser.add_argument("--db-path", default="data/media.db", help="SQLite DB path")
+    parser.add_argument("--log-level", default="info", help="Log level: debug/info/warning/error/critical")
     args = parser.parse_args()
     return ServerConfig(
         host=args.host,
@@ -52,4 +54,5 @@ def parse_args():
         storage_sts_policy=args.storage_sts_policy,
         storage_sts_duration=args.storage_sts_duration,
         db_path=args.db_path,
+        log_level=args.log_level,
     )

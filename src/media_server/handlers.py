@@ -37,13 +37,9 @@ def handle_fast_upload(handler, workspace_id):
         payload.get("path"),
         fingerprint,
         tiny_fingerprint,
-        token[:6] + "***",
+        token,
     )
-    logging.info(
-        "fast-upload fingerprints: fingerprint=%s tiny=%s",
-        fingerprint,
-        tiny_fingerprint,
-    )
+    logging.debug("fast-upload fingerprints: fingerprint=%s tiny=%s", fingerprint, tiny_fingerprint)
 
     stored_key = handler.db.get_object_key_by_fingerprint(workspace_id, fingerprint)
     if stored_key:
@@ -99,7 +95,7 @@ def handle_tiny_fingerprints(handler, workspace_id):
         workspace_id,
         len(requested),
         len(found),
-        token[:6] + "***",
+        token,
     )
 
     json_response(handler, HTTPStatus.OK, {"code": 0, "message": "success", "data": {"tiny_fingerprints": found}})
@@ -135,11 +131,11 @@ def handle_sts(handler, workspace_id):
         }
     }
 
-    logging.info("sts response payload=%s", json.dumps(payload, ensure_ascii=True))
+    logging.debug("sts response payload=%s", json.dumps(payload, ensure_ascii=True))
     logging.info(
         "sts workspace_id=%s token=%s",
         workspace_id,
-        token[:6] + "***",
+        token,
     )
     json_response(handler, HTTPStatus.OK, payload)
 
@@ -188,12 +184,8 @@ def handle_upload_callback(handler, workspace_id):
         workspace_id,
         payload.get("name"),
         object_key,
-        token[:6] + "***",
+        token,
     )
-    logging.info(
-        "upload-callback fingerprints: fingerprint=%s tiny=%s",
-        fingerprint,
-        tiny_fingerprint,
-    )
+    logging.debug("upload-callback fingerprints: fingerprint=%s tiny=%s", fingerprint, tiny_fingerprint)
 
     json_response(handler, HTTPStatus.OK, {"code": 0, "message": "success", "data": object_key})
