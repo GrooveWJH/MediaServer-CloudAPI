@@ -81,13 +81,14 @@ docker run --rm -v /tmp/mc:/root/.mc minio/mc mb local/media
 ```bash
 python3 src/media_server/server.py \
   --host 0.0.0.0 --port 8090 --token demo-token \
-  --storage-endpoint http://<your ip>:9000 \
+  --storage-endpoint http://yourIP:9000 \
   --storage-bucket media \
   --storage-region us-east-1 \
   --storage-access-key minioadmin \
   --storage-secret-key minioadmin \
   --storage-sts-role-arn arn:aws:iam::minio:role/dji-pilot \
-  --db-path data/media.db
+  --db-path data/media.db \
+  --log-level info
 ```
 
 命令说明：
@@ -95,7 +96,7 @@ python3 src/media_server/server.py \
 - `python3 src/media_server/server.py`：启动媒体管理服务入口。
 - `--host 0.0.0.0 --port 8090`：对外监听地址与端口，便于 RC 访问。
 - `--token demo-token`：Pilot2 调用媒体服务时使用的固定鉴权令牌。
-- `--storage-endpoint http://<your ip>:9000`：MinIO API 地址，必须是 RC 能访问到的局域网 IP。
+- `--storage-endpoint http://yourIP:9000`：MinIO API 地址，必须是 RC 能访问到的局域网 IP。
 - `--storage-bucket media`：对象存储桶名。
 - `--storage-region us-east-1`：S3 兼容区域标识（MinIO 任意填写即可，保持一致）。
 - `--storage-access-key/--storage-secret-key`：MinIO 管理账号密码。
@@ -113,12 +114,37 @@ python3 src/media_server/server.py \
 - `storage-sts-policy` 可选，JSON 字符串（用于限制临时凭证权限）
 - `storage-sts-duration` 临时凭证有效期（秒）
 - `db-path` SQLite 数据库文件路径（用于持久化 fingerprint / tiny_fingerprint）
+- `log-level` 日志级别（debug/info/warning/error/critical），默认 `info`
 
 ## 4. RC WebView 配置
 
 1) 媒体管理地址：`<你的电脑IP>:8090`  
 2) Token：与服务端一致（默认 `demo-token`）  
 3) 确保 RC 与电脑在同一局域网
+
+## 4.1 Web 浏览器（Flask）
+
+提供一个基础 Web 页面，实时读取 SQLite 并通过 MinIO 预览图片，支持删除（同时删除 DB 与对象存储）。
+
+依赖安装（仅该页面需要）：
+
+```bash
+python3 -m pip install flask
+```
+
+启动（在 MinIO + `server.py` 启动后执行）：
+
+```bash
+python3 web/app.py \
+  --db-path data/media.db \
+  --storage-endpoint http://yourIP:9000 \
+  --storage-bucket media \
+  --storage-region us-east-1 \
+  --storage-access-key minioadmin \
+  --storage-secret-key minioadmin
+```
+
+访问：`http://<你的电脑IP>:8088`
 
 ## 5. 验证流程
 
