@@ -106,12 +106,28 @@ def handle_sts(handler, workspace_id):
     if not token:
         return
 
+    logging.debug(
+        "sts request config endpoint=%s bucket=%s region=%s role_arn=%s duration=%s policy_len=%s",
+        handler.config.storage_endpoint,
+        handler.config.storage_bucket,
+        handler.config.storage_region,
+        handler.config.storage_sts_role_arn,
+        handler.config.storage_sts_duration,
+        len(handler.config.storage_sts_policy or ""),
+    )
     try:
         security_token, access_key, secret_key, expire_seconds = fetch_minio_sts(handler.config, workspace_id)
     except RuntimeError as exc:
         logging.error("sts error=%s", exc)
         json_response(handler, HTTPStatus.INTERNAL_SERVER_ERROR, {"code": 500, "message": "sts failed", "data": {}})
         return
+
+    logging.debug(
+        "sts issued access_key_id=%s token_len=%s expire_seconds=%s",
+        access_key,
+        len(security_token or ""),
+        expire_seconds,
+    )
 
     payload = {
         "code": 0,
@@ -122,15 +138,33 @@ def handle_sts(handler, workspace_id):
             "bucket": handler.config.storage_bucket,
             "region": handler.config.storage_region,
             "object_key_prefix": f"media/{workspace_id}/",
+            "access_key_id": access_key,
+            "access_key_secret": secret_key,
+            "security_token": security_token,
+            "session_token": security_token,
+            "accessKeyId": access_key,
+            "accessKeySecret": secret_key,
+            "securityToken": security_token,
+            "sessionToken": security_token,
+            "expire": expire_seconds,
             "credentials": {
                 "access_key_id": access_key,
                 "access_key_secret": secret_key,
                 "security_token": security_token,
+                "session_token": security_token,
+                "accessKeyId": access_key,
+                "accessKeySecret": secret_key,
+                "securityToken": security_token,
+                "sessionToken": security_token,
                 "expire": expire_seconds
             }
         }
     }
 
+    logging.debug(
+        "sts response fields=%s",
+        sorted(payload["data"]["credentials"].keys()),
+    )
     logging.debug("sts response payload=%s", json.dumps(payload, ensure_ascii=True))
     logging.info(
         "sts workspace_id=%s token=%s",
