@@ -9,10 +9,13 @@ GRAY="\033[90m"
 RESET="\033[0m"
 
 say() { printf "%b\n" "$1"; }
+say_err() { printf "%b\n" "$1" >&2; }
 ok() { say "${GREEN}OK${RESET} $1"; }
 warn() { say "${YELLOW}WARN${RESET} $1"; }
 err() { say "${RED}ERR${RESET} $1"; }
 info() { say "${BLUE}INFO${RESET} $1"; }
+warn_err() { say_err "${YELLOW}WARN${RESET} $1"; }
+info_err() { say_err "${BLUE}INFO${RESET} $1"; }
 
 require_sudo() {
   if ! sudo -v; then
@@ -31,11 +34,11 @@ get_user() {
 
 detect_ips() {
   if command -v hostname >/dev/null 2>&1; then
-    hostname -I 2>/dev/null | tr ' ' '\n' | rg -v '^$' || true
+    hostname -I 2>/dev/null | tr ' ' '\n' | sed '/^$/d'
     return
   fi
   if command -v ip >/dev/null 2>&1; then
-    ip -4 addr show | rg -o "inet ([0-9.]+)" -r '$1' | rg -v '^127\.' || true
+    ip -4 addr show | awk '/inet /{print $2}' | cut -d/ -f1 | grep -v '^127\.' || true
   fi
 }
 
@@ -43,30 +46,27 @@ choose_ip() {
   local ips
   mapfile -t ips < <(detect_ips)
   if [[ ${#ips[@]} -eq 0 ]]; then
-    warn "No LAN IP detected"
+    warn_err "No LAN IP detected"
   else
-    info "Detected IPs:"
+    info_err "Detected IPs:"
     for i in "${!ips[@]}"; do
-      say "  [$((i+1))] ${ips[$i]}"
+      say_err "  [$((i+1))] ${ips[$i]}"
     done
   fi
 
   while true; do
-    say ""
-    say "Choose storage endpoint IP:"
-    say "  [L] Use detected LAN IP"
-    say "  [C] Custom IP"
-    read -r -p "> " choice
+    say_err ""
+    read -r -p "Select IP source: 1=Use detected LAN IP, 2=Enter custom IP: " choice >&2
     case "${choice}" in
-      L|l)
+      1)
         if [[ ${#ips[@]} -eq 0 ]]; then
-          warn "No LAN IP available, choose custom"
+          warn_err "No LAN IP available, choose custom"
           continue
         fi
         echo "${ips[0]}"
         return
         ;;
-      C|c)
+      2)
         read -r -p "Enter IP address: " custom_ip
         if [[ -n "${custom_ip}" ]]; then
           echo "${custom_ip}"
@@ -74,7 +74,7 @@ choose_ip() {
         fi
         ;;
       *)
-        warn "Invalid choice"
+        warn_err "Invalid choice"
         ;;
     esac
   done
@@ -84,6 +84,47 @@ confirm() {
   local prompt="$1"
   read -r -p "${prompt} [y/N] " ans
   [[ "${ans}" == "y" || "${ans}" == "Y" ]]
+}
+
+ensure_docker_enabled() {
+  if command -v systemctl >/dev/null 2>&1; then
+    if ! systemctl is-enabled docker >/dev/null 2>&1; then
+      sudo systemctl enable --now docker >/dev/null 2>&1 || true
+    fi
+  fi
+}
+
+wait_for_minio() {
+  local endpoint="$1"
+  local retries=30
+  local wait_sec=2
+  for _ in $(seq 1 "${retries}"); do
+    if curl -sSf "${endpoint}/minio/health/ready" >/dev/null 2>&1; then
+      return 0
+    fi
+    sleep "${wait_sec}"
+  done
+  return 1
+}
+
+ensure_bucket() {
+  local endpoint="$1"
+  local access_key="$2"
+  local secret_key="$3"
+  local bucket="$4"
+  local mc_config_dir="$5"
+
+  info "Ensuring bucket exists: ${bucket}"
+  if ! docker image inspect minio/mc:latest >/dev/null 2>&1; then
+    info "Pulling minio/mc image"
+    sudo docker pull minio/mc:latest
+  fi
+
+  sudo mkdir -p "${mc_config_dir}"
+  sudo docker run --rm -v "${mc_config_dir}:/root/.mc" minio/mc \
+    alias set local "${endpoint}" "${access_key}" "${secret_key}" >/dev/null
+  sudo docker run --rm -v "${mc_config_dir}:/root/.mc" minio/mc \
+    mb --ignore-existing "local/${bucket}" >/dev/null
 }
 
 print_summary() {
@@ -158,10 +199,14 @@ install_or_update() {
 
   local storage_ip
   storage_ip="$(choose_ip)"
+  if [[ -z "${storage_ip}" ]]; then
+    err "No IP selected; aborting setup"
+    exit 1
+  fi
   info "Selected IP: ${storage_ip}"
 
   info "Writing environment file"
-  cat > "${target_root}/deploy/media-server.env" <<EOF
+  sudo tee "${target_root}/deploy/media-server.env" >/dev/null <<EOF
 MEDIA_SERVER_HOST=0.0.0.0
 MEDIA_SERVER_PORT=8090
 MEDIA_SERVER_TOKEN=demo-token
@@ -181,6 +226,15 @@ LOG_LEVEL=info
 WEB_PORT=8088
 EOF
   actions+=("wrote ${target_root}/deploy/media-server.env")
+  ok "STORAGE_ENDPOINT set to http://${storage_ip}:9000"
+
+  info "Writing MinIO compose env"
+  sudo tee "${target_root}/deploy/.env" >/dev/null <<EOF
+MINIO_ROOT_USER=${STORAGE_ACCESS_KEY}
+MINIO_ROOT_PASSWORD=${STORAGE_SECRET_KEY}
+MINIO_BUCKET=${STORAGE_BUCKET}
+EOF
+  actions+=("wrote ${target_root}/deploy/.env")
 
   info "Installing systemd units"
   sed -e "s|^WorkingDirectory=.*|WorkingDirectory=${target_root}|" \
@@ -200,9 +254,31 @@ EOF
   sudo systemctl daemon-reload
   actions+=("installed systemd units")
 
+  info "Preparing MinIO data directory"
+  sudo mkdir -p "${target_root}/deploy/minio-data"
+  sudo chown -R 1000:1000 "${target_root}/deploy/minio-data" || true
+  actions+=("prepared MinIO data directory")
+
+  ensure_docker_enabled
+  actions+=("ensured docker service enabled")
+
   info "Starting MinIO with docker compose"
   sudo docker compose -f "${target_root}/deploy/docker-compose.yml" up -d
   actions+=("started MinIO via docker compose")
+
+  info "Waiting for MinIO to be ready"
+  # Load env values to use the same endpoint/credentials for bucket creation.
+  set -a
+  # shellcheck disable=SC1090
+  source "${target_root}/deploy/media-server.env"
+  set +a
+  if wait_for_minio "${STORAGE_ENDPOINT}"; then
+    ensure_bucket "${STORAGE_ENDPOINT}" "${STORAGE_ACCESS_KEY}" "${STORAGE_SECRET_KEY}" "${STORAGE_BUCKET}" "${target_root}/deploy/.mc"
+    actions+=("created bucket ${STORAGE_BUCKET} (if missing)")
+  else
+    warn "MinIO not ready; skipped bucket creation"
+    actions+=("skipped bucket creation (MinIO not ready)")
+  fi
 
   info "Enabling services"
   sudo systemctl enable --now media-server.service
@@ -218,9 +294,9 @@ main() {
 
   say ""
   say "Choose action:"
-  say "  [1] Install/Update deployment"
+  say "  [1] Install or update deployment"
   say "  [2] Cleanup deployment"
-  read -r -p "> " action
+  read -r -p "Enter choice (1/2): " action
   case "${action}" in
     1) install_or_update ;;
     2) cleanup_all ;;
