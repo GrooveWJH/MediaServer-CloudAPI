@@ -137,7 +137,7 @@ def handle_sts(handler, workspace_id):
             "endpoint": handler.config.storage_endpoint,
             "bucket": handler.config.storage_bucket,
             "region": handler.config.storage_region,
-            "object_key_prefix": f"media/{workspace_id}/",
+            "object_key_prefix": f"{workspace_id}/",
             "access_key_id": access_key,
             "access_key_secret": secret_key,
             "security_token": security_token,
@@ -188,6 +188,26 @@ def handle_upload_callback(handler, workspace_id):
     object_key = payload.get("object_key")
     if not object_key:
         json_response(handler, HTTPStatus.BAD_REQUEST, {"code": 400, "message": "missing object_key", "data": {}})
+        return
+
+    try:
+        object_exists = head_object(handler.config, object_key)
+    except RuntimeError as exc:
+        logging.error("upload-callback head check failed: %s", exc)
+        json_response(
+            handler,
+            HTTPStatus.BAD_GATEWAY,
+            {"code": 502, "message": "object check failed", "data": {}},
+        )
+        return
+
+    if not object_exists:
+        logging.warning("upload-callback object missing: %s", object_key)
+        json_response(
+            handler,
+            HTTPStatus.NOT_FOUND,
+            {"code": 404, "message": "object not found", "data": {}},
+        )
         return
 
     fingerprint = payload.get("fingerprint")

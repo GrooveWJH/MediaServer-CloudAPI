@@ -15,4 +15,4 @@ def json_response(handler, status, payload):
 def build_object_key(workspace_id, filename):
     safe_name = (filename or "unknown").replace("/", "_")
     date_part = time.strftime("%Y%m%d", time.localtime())
-    return f"media/{workspace_id}/{date_part}/{safe_name}"
+    return f"{workspace_id}/{date_part}/{safe_name}"
