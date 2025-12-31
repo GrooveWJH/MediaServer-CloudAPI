@@ -184,6 +184,14 @@ install_or_update() {
   local data_root="/opt/mediaserver/data"
   local user_name
   user_name="$(get_user)"
+  local storage_bucket="media"
+  local storage_region="us-east-1"
+  local storage_access_key="minioadmin"
+  local storage_secret_key="minioadmin"
+  local storage_sts_role_arn="arn:aws:iam::minio:role/dji-pilot"
+  local storage_sts_policy=""
+  local storage_sts_duration="3600"
+  local log_level="debug"
   local actions=()
 
   info "Preparing directories"
@@ -212,16 +220,16 @@ MEDIA_SERVER_PORT=8090
 MEDIA_SERVER_TOKEN=demo-token
 
 STORAGE_ENDPOINT=http://${storage_ip}:9000
-STORAGE_BUCKET=media
-STORAGE_REGION=us-east-1
-STORAGE_ACCESS_KEY=minioadmin
-STORAGE_SECRET_KEY=minioadmin
-STORAGE_STS_ROLE_ARN=arn:aws:iam::minio:role/dji-pilot
-STORAGE_STS_POLICY=
-STORAGE_STS_DURATION=3600
+STORAGE_BUCKET=${storage_bucket}
+STORAGE_REGION=${storage_region}
+STORAGE_ACCESS_KEY=${storage_access_key}
+STORAGE_SECRET_KEY=${storage_secret_key}
+STORAGE_STS_ROLE_ARN=${storage_sts_role_arn}
+STORAGE_STS_POLICY=${storage_sts_policy}
+STORAGE_STS_DURATION=${storage_sts_duration}
 
 DB_PATH=/opt/mediaserver/data/media.db
-LOG_LEVEL=info
+LOG_LEVEL=${log_level}
 
 WEB_PORT=8088
 EOF
@@ -230,9 +238,9 @@ EOF
 
   info "Writing MinIO compose env"
   sudo tee "${target_root}/deploy/.env" >/dev/null <<EOF
-MINIO_ROOT_USER=${STORAGE_ACCESS_KEY}
-MINIO_ROOT_PASSWORD=${STORAGE_SECRET_KEY}
-MINIO_BUCKET=${STORAGE_BUCKET}
+MINIO_ROOT_USER=${storage_access_key}
+MINIO_ROOT_PASSWORD=${storage_secret_key}
+MINIO_BUCKET=${storage_bucket}
 EOF
   actions+=("wrote ${target_root}/deploy/.env")
 
