@@ -167,6 +167,14 @@ python3 web/app.py \
 2) `server.py` 使用 systemd 开机自启
 3) Web 浏览器使用 systemd 开机自启（可选）
 
+推荐使用交互式脚本（会自动同步到 `/opt/mediaserver/MediaServer-CloudAPI` 并配置 systemd）：
+
+```bash
+bash deploy/setup.sh
+```
+
+脚本支持一键清理与是否保留数据库的选择，并会输出执行摘要。
+
 ### 7.1 MinIO（Docker Compose）
 
 在目标机上准备目录（示例路径可按需调整）：
