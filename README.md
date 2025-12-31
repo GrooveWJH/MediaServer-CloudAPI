@@ -2,6 +2,20 @@
 
 本目录提供一个可运行的媒体管理服务（Python 标准库实现），配合 MinIO 对象存储即可让 DJI Pilot2 自动上传媒体文件。
 
+## 目录
+
+- [目录结构](#目录结构)
+- [依赖](#依赖)
+- [端口说明](#端口说明)
+- [1. 启动 MinIO（Docker）](#1-启动-miniodocker)
+- [2. 创建 bucket](#2-创建-bucket)
+- [3. 启动媒体管理服务](#3-启动媒体管理服务)
+- [4. RC WebView 配置](#4-rc-webview-配置)
+- [4.1 Web 浏览器（Flask）](#41-web-浏览器flask)
+- [5. 验证流程](#5-验证流程)
+- [6. 调试指南](#6-调试指南)
+- [object_key 规则](#object_key-规则)
+- [7. Linux 部署建议（Ubuntu 20/22/24 LTS）](#7-linux-部署建议ubuntu-202224-lts)
 ## 目录结构
 
 - `src/media_server/server.py` 服务入口（保持原用法）
@@ -145,6 +159,72 @@ python3 web/app.py \
 ```
 
 访问：`http://<你的电脑IP>:8088`
+
+## 7. Linux 部署建议（Ubuntu 20/22/24 LTS）
+
+以下方案提供三件事：
+1) MinIO 使用 Docker Compose 常驻
+2) `server.py` 使用 systemd 开机自启
+3) Web 浏览器使用 systemd 开机自启（可选）
+
+### 7.1 MinIO（Docker Compose）
+
+在目标机上准备目录（示例路径可按需调整）：
+
+```bash
+sudo mkdir -p /opt/mediaserver/MediaServer-CloudAPI
+sudo chown -R $USER:$USER /opt/mediaserver
+```
+
+拷贝本项目到 `/opt/mediaserver/MediaServer-CloudAPI` 后：
+
+```bash
+cd /opt/mediaserver/MediaServer-CloudAPI/deploy
+docker compose up -d
+```
+
+### 7.2 配置环境变量
+
+编辑环境文件：
+
+```bash
+sudo nano /opt/mediaserver/MediaServer-CloudAPI/deploy/media-server.env
+```
+
+确认以下字段：
+- `STORAGE_ENDPOINT` 建议使用本机可达地址（如 `http://127.0.0.1:9000`）
+- `DB_PATH` 建议放到持久化目录（如 `/opt/mediaserver/data/media.db`）
+- `MEDIA_SERVER_TOKEN` 与 Pilot2 配置一致
+
+### 7.3 systemd 服务
+
+复制 service 文件：
+
+```bash
+sudo cp /opt/mediaserver/MediaServer-CloudAPI/deploy/media-server.service /etc/systemd/system/
+sudo cp /opt/mediaserver/MediaServer-CloudAPI/deploy/media-web.service /etc/systemd/system/
+```
+
+修改 service 中的 `User/Group` 与路径（默认为 `ubuntu` 与 `/opt/mediaserver/MediaServer-CloudAPI`）。
+
+启用并启动：
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable media-server.service
+sudo systemctl start media-server.service
+
+# 可选：Web 浏览器
+sudo systemctl enable media-web.service
+sudo systemctl start media-web.service
+```
+
+查看日志：
+
+```bash
+sudo journalctl -u media-server.service -f
+sudo journalctl -u media-web.service -f
+```
 
 ## 5. 验证流程
 
