@@ -1,0 +1,30 @@
+[Unit]
+Description=MediaServer CloudAPI
+After=network.target docker.service
+Wants=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/mediaserver/MediaServer-CloudAPI
+EnvironmentFile=/opt/mediaserver/MediaServer-CloudAPI/deploy/media-server.env
+ExecStart=/usr/bin/python3 /opt/mediaserver/MediaServer-CloudAPI/src/media_server/server.py \
+  --host ${MEDIA_SERVER_HOST} \
+  --port ${MEDIA_SERVER_PORT} \
+  --token ${MEDIA_SERVER_TOKEN} \
+  --storage-endpoint ${STORAGE_ENDPOINT} \
+  --storage-bucket ${STORAGE_BUCKET} \
+  --storage-region ${STORAGE_REGION} \
+  --storage-access-key ${STORAGE_ACCESS_KEY} \
+  --storage-secret-key ${STORAGE_SECRET_KEY} \
+  --storage-sts-role-arn ${STORAGE_STS_ROLE_ARN} \
+  --storage-sts-policy ${STORAGE_STS_POLICY} \
+  --storage-sts-duration ${STORAGE_STS_DURATION} \
+  --db-path ${DB_PATH} \
+  --log-level ${LOG_LEVEL}
+Restart=on-failure
+RestartSec=2
+User=ubuntu
+Group=ubuntu
+
+[Install]
+WantedBy=multi-user.target
