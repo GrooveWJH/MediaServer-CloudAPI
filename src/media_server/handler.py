@@ -67,7 +67,17 @@ class MediaRequestHandler(BaseHTTPRequestHandler):
         raw = self.rfile.read(content_length) if content_length > 0 else b""
         if not raw:
             return {}
-        return json.loads(raw.decode("utf-8"))
+        payload = json.loads(raw.decode("utf-8"))
+        if logging.getLogger().isEnabledFor(logging.DEBUG):
+            summary = {"keys": sorted(payload.keys())}
+            if "fingerprint" in payload:
+                summary["fingerprint"] = f"{payload['fingerprint'][:8]}..."
+            if "tiny_fingerprints" in payload and isinstance(payload["tiny_fingerprints"], list):
+                summary["tiny_count"] = len(payload["tiny_fingerprints"])
+            if "object_key" in payload:
+                summary["object_key"] = payload["object_key"]
+            logging.debug("request %s %s payload=%s", self.command, self.path, summary)
+        return payload
 
     def require_token(self):
         token = self.headers.get("x-auth-token")
