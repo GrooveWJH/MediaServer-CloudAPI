@@ -11,16 +11,21 @@
 
 - `src/media_server/server.py`：入口脚本，负责修正 `sys.path` 并启动服务
 - `src/media_server/app.py`：解析配置并启动 HTTPServer，初始化 SQLite
-- `src/media_server/config.py`：命令行参数与配置对象
+- `src/media_server/config/`：命令行参数与配置对象
 - `src/media_server/handler.py`：路由分发与基础请求处理
-- `src/media_server/handlers.py`：四个核心接口逻辑
-- `src/media_server/router.py`：URL 匹配
-- `src/media_server/sts.py`：向 MinIO STS 请求临时凭证
-- `src/media_server/aws_sigv4.py`：SigV4 签名实现
-- `src/media_server/s3_client.py`：S3 HEAD 校验对象是否存在
-- `src/media_server/http_utils.py`：统一 JSON 响应与 object_key 生成
+- `src/media_server/handlers/`：四个核心接口逻辑
+- `src/media_server/http_layer/router.py`：URL 匹配
+- `src/media_server/storage/sts.py`：向 MinIO STS 请求临时凭证
+- `src/media_server/utils/aws_sigv4.py`：SigV4 签名实现
+- `src/media_server/storage/s3_client.py`：S3 HEAD 校验对象是否存在
+- `src/media_server/utils/http.py`：统一 JSON 响应与 object_key 生成
 - `src/media_server/scripts/`：测试脚本与图片生成
 - `doc/flow.md`：流程图与架构图
+
+## 验证状态
+
+- 已通过 `src/media_server/scripts/test_refactor_smoke.py`（结构与核心接口解析自检）
+- 已通过 `src/media_server/scripts/test_sts_upload.py`（STS -> PUT/HEAD/DELETE 端到端链路）
 
 ## 核心接口（已实现）
 

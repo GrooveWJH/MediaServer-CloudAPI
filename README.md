@@ -87,6 +87,13 @@ python3 src/media_server/server.py \
   --log-level info
 ```
 
+精简指令（只改 IP）：
+
+```bash
+python3 src/media_server/server.py \
+  --storage-endpoint http://<你的电脑IP>:9000
+```
+
 参数说明：
 
 - `storage-endpoint` 用你电脑的局域网 IP，RC 才能连到
@@ -124,6 +131,13 @@ python3 web/app.py \
   --storage-region us-east-1 \
   --storage-access-key minioadmin \
   --storage-secret-key minioadmin
+```
+
+精简指令（只改 IP）：
+
+```bash
+python3 web/app.py \
+  --storage-endpoint http://<你的电脑IP>:9000
 ```
 
 访问：`http://<你的电脑IP>:8088`
@@ -182,7 +196,19 @@ sudo journalctl -u media-web.service -f
 
 ## 验证流程
 
-### 1) 服务连通性
+### 1) 服务健康检查
+
+```bash
+curl -s http://127.0.0.1:8090/health
+```
+
+应返回：
+
+```
+{"code":0,"message":"ok","data":{}}
+```
+
+### 2) 服务连通性
 
 在 RC 上点击“状态检查”，日志显示：
 
@@ -191,7 +217,7 @@ sudo journalctl -u media-web.service -f
 [存储] 服务可达: http://<你的电脑IP>:9000 (200)
 ```
 
-### 2) Pilot2 自动上传
+### 3) Pilot2 自动上传
 
 在 Pilot2 上拍一张新照片，服务端日志应出现：
 
@@ -200,7 +226,7 @@ sudo journalctl -u media-web.service -f
 - `sts`
 - `upload-callback`
 
-### 3) STS + 上传自测脚本
+### 4) STS + 上传自测脚本
 
 先跑自测脚本，确认 STS 与 MinIO 直传链路可用：
 
@@ -257,20 +283,18 @@ docker run --rm -v /tmp/mc:/root/.mc minio/mc \
 - 没有 `upload-callback`：上传未完成或上传失败
 - MinIO Console 看不到对象：自测脚本会 DELETE（正常）
 - RC 连不上：检查防火墙是否阻止 `8090/9000` 端口
-- 指纹持久化位置：默认 `data/media.db`
+- 指纹持久化位置：默认 `data/media.db`（`media_files` 同时存 fingerprint 与 tiny_fingerprint）
 
 ## 目录结构
 
 - `src/media_server/server.py` 服务入口（保持原用法）
 - `src/media_server/app.py` 服务启动与配置加载
 - `src/media_server/handler.py` 路由分发与基础请求处理
-- `src/media_server/handlers.py` 各接口处理逻辑
-- `src/media_server/sts.py` MinIO STS 交互
-- `src/media_server/aws_sigv4.py` SigV4 签名
-- `src/media_server/s3_client.py` S3 HEAD 校验对象存在
-- `src/media_server/db.py` SQLite 持久化
-- `src/media_server/http_utils.py` 通用响应与 object_key 生成
-- `src/media_server/router.py` 路径匹配
+- `src/media_server/handlers/` 各接口处理逻辑
+- `src/media_server/http_layer/` 请求解析/错误码/路由
+- `src/media_server/storage/` 存储层（STS/S3/DB/签名）
+- `src/media_server/utils/` 通用工具（HTTP 响应/安全清理/签名）
+- `src/media_server/config/` 配置对象与参数解析
 - `src/media_server/scripts/test_sts_upload.py` STS + MinIO 直传自测脚本
 - `src/media_server/scripts/image_gen.py` 生成随机 PNG 测试图
 - `doc/flow.md` 执行流程与架构图

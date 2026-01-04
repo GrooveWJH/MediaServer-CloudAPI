@@ -1,0 +1,20 @@
+<section class="media-section" data-last-id="{{ items[0].id if items else 0 }}">
+  <div class="media-empty{% if items %} hidden{% endif %}">暂无媒体记录</div>
+  <div class="media-grid">
+    {% for item in items %}
+      <article class="media-card" data-record-id="{{ item.id }}">
+        <div class="media-preview">
+          <img src="{{ url_for('preview', object_key=item.object_key) }}" alt="{{ item.file_name or item.object_key }}" loading="lazy" />
+        </div>
+        <div class="media-meta"><strong>名称：</strong>{{ item.file_name or "-" }}</div>
+        <div class="media-meta"><strong>时间：</strong>{{ item.created_at }}</div>
+        <div class="media-meta"><strong>Workspace：</strong>{{ item.workspace_id }}</div>
+        <div class="media-meta"><strong>Object Key：</strong>{{ item.object_key }}</div>
+        <div class="media-meta"><strong>Fingerprint：</strong>{{ item.fingerprint or "-" }}</div>
+        <div class="media-actions">
+          <button type="button" data-delete="1" data-record-id="{{ item.id }}" data-object-key="{{ item.object_key }}">删除</button>
+        </div>
+      </article>
+    {% endfor %}
+  </div>
+</section>

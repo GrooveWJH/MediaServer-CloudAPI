@@ -890,10 +890,19 @@ class S3Client:
 src/media_server/
 ├── __init__.py
 ├── app.py              # 入口，初始化配置和服务
-├── config.py           # 配置类（ServerConfig, StorageConfig, STSConfig）
+├── config/             # 配置类（ServerConfig, StorageConfig, STSConfig）
+│   ├── __init__.py
+│   ├── app.py
+│   ├── server.py
+│   ├── storage.py
+│   └── sts.py
 ├── server.py           # HTTP 服务器
 ├── handler.py          # 请求处理器（无状态）
-├── router.py           # 路由匹配（基于正则）
+├── http_layer/         # HTTP 层（路由/错误码/模型）
+│   ├── __init__.py
+│   ├── error_codes.py
+│   ├── request_models.py
+│   └── router.py
 ├── handlers/           # 拆分 handlers.py
 │   ├── __init__.py
 │   ├── fast_upload.py
@@ -921,3 +930,17 @@ src/media_server/
 - 代码可测试、可复用
 
 这就是好品味。
+
+---
+
+## 当前重构进展（已完成）
+
+1. `MediaRequestHandler` 类级共享状态已移除
+2. `media_files` 成为单一真相来源（fingerprint/tiny_fingerprint 落库）
+3. DB 改为连接池 + 明确事务边界
+4. 路由分发与错误响应已统一
+5. 按职责拆分为多级子目录（handlers/http_layer/storage/utils/config）
+6. handlers 拆分为独立模块
+7. storage 层改为 `S3Client` 类
+8. HTTP 响应与签名工具迁移到 utils
+9. config 分层（Server/Storage/STS）
