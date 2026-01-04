@@ -4,32 +4,32 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode, urlparse
 from urllib.request import Request, urlopen
 
-from .aws_sigv4 import aws_v4_headers
+from ..utils.aws_sigv4 import aws_v4_headers
 
 
-def fetch_minio_sts(config, workspace_id):
-    endpoint = urlparse(config.storage_endpoint)
+def fetch_minio_sts(storage_config, sts_config, workspace_id):
+    endpoint = urlparse(storage_config.endpoint)
     if not endpoint.scheme or not endpoint.netloc:
-        raise RuntimeError(f"invalid storage endpoint: {config.storage_endpoint}")
+        raise RuntimeError(f"invalid storage endpoint: {storage_config.endpoint}")
 
-    role_arn = config.storage_sts_role_arn
+    role_arn = sts_config.role_arn
     session_name = f"dji-{workspace_id[:8]}-{uuid.uuid4().hex[:8]}"
     params = {
         "Action": "AssumeRole",
         "Version": "2011-06-15",
-        "DurationSeconds": str(config.storage_sts_duration),
+        "DurationSeconds": str(sts_config.duration),
         "RoleSessionName": session_name,
         "RoleArn": role_arn,
     }
-    if config.storage_sts_policy:
-        params["Policy"] = config.storage_sts_policy
+    if sts_config.policy:
+        params["Policy"] = sts_config.policy
 
     body = urlencode(params).encode("utf-8")
     host = endpoint.netloc
     headers = aws_v4_headers(
-        config.storage_access_key,
-        config.storage_secret_key,
-        config.storage_region,
+        storage_config.access_key,
+        storage_config.secret_key,
+        storage_config.region,
         "sts",
         "POST",
         host,
@@ -39,7 +39,7 @@ def fetch_minio_sts(config, workspace_id):
     )
     headers["content-type"] = "application/x-www-form-urlencoded"
 
-    request = Request(config.storage_endpoint, data=body, headers=headers, method="POST")
+    request = Request(storage_config.endpoint, data=body, headers=headers, method="POST")
     try:
         with urlopen(request, timeout=10) as response:
             raw = response.read()

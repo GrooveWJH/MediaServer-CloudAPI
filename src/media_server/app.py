@@ -2,7 +2,7 @@ import logging
 from http.server import HTTPServer
 
 from .config import parse_args
-from .db import MediaDB
+from .storage.db import MediaDB
 from .handler import MediaRequestHandler
 
 
@@ -40,13 +40,15 @@ def main():
     MediaRequestHandler.config = config
     MediaRequestHandler.db = MediaDB(config.db_path)
 
-    server = HTTPServer((config.host, config.port), MediaRequestHandler)
-    logging.info("Media server listening on %s:%s", config.host, config.port)
+    server = HTTPServer((config.server.host, config.server.port), MediaRequestHandler)
+    logging.info("Media server listening on %s:%s", config.server.host, config.server.port)
     try:
         server.serve_forever()
     except KeyboardInterrupt:
         logging.info("Shutting down...")
     finally:
+        if getattr(MediaRequestHandler, "db", None):
+            MediaRequestHandler.db.close()
         server.server_close()
 
 

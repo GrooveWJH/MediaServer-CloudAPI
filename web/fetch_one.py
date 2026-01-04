@@ -8,7 +8,7 @@ from urllib.request import Request, urlopen
 repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(repo_root, "src"))
 
-from media_server.aws_sigv4 import aws_v4_headers
+from media_server.utils.aws_sigv4 import aws_v4_headers
 
 
 def _encode_path(path):

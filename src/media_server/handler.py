@@ -10,18 +10,13 @@ from .handlers import (
     handle_tiny_fingerprints,
     handle_upload_callback,
 )
-from .http_utils import json_response
-from .router import match_fast_upload, match_sts, match_tiny_fingerprints, match_upload_callback
+from .http_layer.error_codes import ERR_INVALID_TOKEN, ERR_MISSING_TOKEN, ERR_NOT_FOUND
+from .utils.http import error_response, ok_response
+from .http_layer.router import resolve_route
 
 
 class MediaRequestHandler(BaseHTTPRequestHandler):
     server_version = "FCMediaServer/0.1"
-    tiny_fingerprint_index = {}
-    pending_tiny_by_fingerprint = {}
-    uploaded_fingerprints = set()
-    object_key_by_fingerprint = {}
-    object_key_by_tiny = {}
-    upload_records = []
     config = None
     db = None
 
@@ -31,9 +26,9 @@ class MediaRequestHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         parsed = urlparse(self.path)
         if parsed.path == "/health":
-            json_response(self, HTTPStatus.OK, {"code": 0, "message": "ok", "data": {}})
+            ok_response(self, {}, message="ok", status=HTTPStatus.OK)
             return
-        json_response(self, HTTPStatus.NOT_FOUND, {"code": 404, "message": "not found", "data": {}})
+        error_response(self, ERR_NOT_FOUND)
 
     def do_OPTIONS(self):
         self.send_response(HTTPStatus.NO_CONTENT)
@@ -44,23 +39,21 @@ class MediaRequestHandler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         parsed = urlparse(self.path)
-        workspace_id = match_fast_upload(parsed.path)
-        if workspace_id:
-            handle_fast_upload(self, workspace_id)
+        route_name, workspace_id = resolve_route("POST", parsed.path)
+        if not route_name or not workspace_id:
+            error_response(self, ERR_NOT_FOUND)
             return
-        workspace_id = match_tiny_fingerprints(parsed.path)
-        if workspace_id:
-            handle_tiny_fingerprints(self, workspace_id)
+        handlers = {
+            "fast-upload": handle_fast_upload,
+            "tiny-fingerprints": handle_tiny_fingerprints,
+            "upload-callback": handle_upload_callback,
+            "sts": handle_sts,
+        }
+        handler = handlers.get(route_name)
+        if not handler:
+            error_response(self, ERR_NOT_FOUND)
             return
-        workspace_id = match_upload_callback(parsed.path)
-        if workspace_id:
-            handle_upload_callback(self, workspace_id)
-            return
-        workspace_id = match_sts(parsed.path)
-        if workspace_id:
-            handle_sts(self, workspace_id)
-            return
-        json_response(self, HTTPStatus.NOT_FOUND, {"code": 404, "message": "not found", "data": {}})
+        handler(self, workspace_id)
 
     def read_json(self):
         content_length = int(self.headers.get("Content-Length", "0"))
@@ -82,9 +75,9 @@ class MediaRequestHandler(BaseHTTPRequestHandler):
     def require_token(self):
         token = self.headers.get("x-auth-token")
         if not token:
-            json_response(self, HTTPStatus.UNAUTHORIZED, {"code": 401, "message": "missing x-auth-token", "data": {}})
+            error_response(self, ERR_MISSING_TOKEN)
             return None
-        if token != self.config.token:
-            json_response(self, HTTPStatus.UNAUTHORIZED, {"code": 401, "message": "invalid x-auth-token", "data": {}})
+        if token != self.config.server.token:
+            error_response(self, ERR_INVALID_TOKEN)
             return None
         return token

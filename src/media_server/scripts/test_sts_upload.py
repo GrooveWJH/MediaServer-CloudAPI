@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-import argparse
 import json
 import os
 import sys
@@ -8,12 +7,13 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import quote, urlparse
 from urllib.request import Request, urlopen
 
+import typer
 repo_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 src_root = os.path.join(repo_root, "src")
 sys.path.insert(0, src_root)
 
 from media_server.scripts.image_gen import random_png_image
-from media_server.aws_sigv4 import aws_v4_headers
+from media_server.utils.aws_sigv4 import aws_v4_headers
 
 
 def _encode_path(path):
@@ -57,21 +57,23 @@ def s3_request(method, endpoint, bucket, object_key, region, access_key, secret_
         return resp.status, resp.read()
 
 
-def main():
-    parser = argparse.ArgumentParser(description="Test DJI media STS + MinIO upload flow")
-    parser.add_argument("--media-host", default="http://127.0.0.1:8090", help="Media server base URL")
-    parser.add_argument("--workspace-id", required=True, help="Workspace ID")
-    parser.add_argument("--token", default="demo-token", help="x-auth-token for media server")
-    parser.add_argument("--payload", default="hello-from-dji", help="Payload string to upload")
-    parser.add_argument("--random-image", action="store_true", help="Upload a random PNG image instead of text")
-    parser.add_argument("--text", action="store_true", help="Upload text payload instead of random image")
-    parser.add_argument("--image-size", default="", help="Random image size WxH, overrides --image-mb")
-    parser.add_argument("--image-mb", type=int, default=10, help="Target image size in MB (default 10MB)")
-    args = parser.parse_args()
+cli = typer.Typer(add_completion=False)
 
-    sts_url = f"{args.media_host}/storage/api/v1/workspaces/{args.workspace_id}/sts"
+
+@cli.callback(invoke_without_command=True)
+def main(
+    media_host: str = typer.Option("http://127.0.0.1:8090", "--media-host", help="Media server base URL"),
+    workspace_id: str = typer.Option(..., "--workspace-id", help="Workspace ID"),
+    token: str = typer.Option("demo-token", "--token", help="x-auth-token for media server"),
+    payload: str = typer.Option("hello-from-dji", "--payload", help="Payload string to upload"),
+    random_image: bool = typer.Option(False, "--random-image", help="Upload a random PNG image instead of text"),
+    text: bool = typer.Option(False, "--text", help="Upload text payload instead of random image"),
+    image_size: str = typer.Option("", "--image-size", help="Random image size WxH, overrides --image-mb"),
+    image_mb: int = typer.Option(10, "--image-mb", help="Target image size in MB (default 10MB)"),
+):
+    sts_url = f"{media_host}/storage/api/v1/workspaces/{workspace_id}/sts"
     print(f"[test] STS request: {sts_url}")
-    data = request_json(sts_url, args.token)
+    data = request_json(sts_url, token)
     if data.get("code") != 0:
         raise RuntimeError(f"sts failed: {data}")
 
@@ -80,18 +82,20 @@ def main():
     endpoint = sts["endpoint"]
     bucket = sts["bucket"]
     region = sts["region"]
-    use_image = args.random_image or not args.text
+    use_image = random_image or not text
     if use_image:
-        size = args.image_size or f"{args.image_mb}MB"
+        size = image_size or f"{image_mb}MB"
         object_key = f"{sts['object_key_prefix']}test-{datetime.now().strftime('%Y%m%d-%H%M%S')}.png"
-        payload = random_png_image(size, args.image_mb)
+        payload = random_png_image(size, image_mb)
         content_desc = f"random PNG {size}"
     else:
         object_key = f"{sts['object_key_prefix']}test-{datetime.now().strftime('%Y%m%d-%H%M%S')}.txt"
-        payload = args.payload.encode("utf-8")
-        content_desc = f"text payload ({len(payload)} bytes)"
+        payload_bytes = payload.encode("utf-8")
+        content_desc = f"text payload ({len(payload_bytes)} bytes)"
 
-    print(f"[test] Payload type: {content_desc}, size={len(payload)} bytes")
+    if use_image:
+        payload_bytes = payload
+    print(f"[test] Payload type: {content_desc}, size={len(payload_bytes)} bytes")
     print(f"[test] Uploading to {endpoint}/{bucket}/{object_key}")
     try:
         status, _ = s3_request(
@@ -103,7 +107,7 @@ def main():
             creds["access_key_id"],
             creds["access_key_secret"],
             creds.get("security_token", ""),
-            payload=payload,
+            payload=payload_bytes,
         )
         print(f"[test] PUT status={status}")
     except HTTPError as exc:
@@ -149,7 +153,7 @@ def main():
 
 if __name__ == "__main__":
     try:
-        main()
+        cli()
     except Exception as exc:
         print(f"[test] ERROR: {exc}", file=sys.stderr)
         sys.exit(1)

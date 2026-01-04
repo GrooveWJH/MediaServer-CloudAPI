@@ -3,17 +3,33 @@
 blinker==1.9.0
     # via flask
 click==8.3.1
-    # via flask
+    # via
+    #   flask
+    #   typer
 flask==3.1.2
     # via mediaserver-cloudapi (pyproject.toml)
 itsdangerous==2.2.0
     # via flask
 jinja2==3.1.6
     # via flask
+markdown-it-py==4.0.0
+    # via rich
 markupsafe==3.0.3
     # via
     #   flask
     #   jinja2
     #   werkzeug
+mdurl==0.1.2
+    # via markdown-it-py
+pygments==2.19.2
+    # via rich
+rich==14.2.0
+    # via typer
+shellingham==1.5.4
+    # via typer
+typer==0.21.0
+    # via mediaserver-cloudapi (pyproject.toml)
+typing-extensions==4.15.0
+    # via typer
 werkzeug==3.1.4
     # via flask

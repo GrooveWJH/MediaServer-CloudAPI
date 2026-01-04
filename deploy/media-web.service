@@ -7,6 +7,7 @@ Wants=network.target
 Type=simple
 WorkingDirectory=/opt/mediaserver/MediaServer-CloudAPI
 EnvironmentFile=/opt/mediaserver/MediaServer-CloudAPI/deploy/media-server.env
+Environment=PYTHONPATH=/opt/mediaserver/MediaServer-CloudAPI/src
 ExecStart=/usr/bin/python3 /opt/mediaserver/MediaServer-CloudAPI/web/app.py \
   --host 0.0.0.0 \
   --port ${WEB_PORT} \

@@ -1,0 +1,8 @@
+from dataclasses import dataclass
+
+
+@dataclass(frozen=True)
+class ServerConfig:
+    host: str
+    port: int
+    token: str

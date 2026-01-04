@@ -1,22 +1,16 @@
 import argparse
 from dataclasses import dataclass
 
+from .server import ServerConfig
+from .storage import StorageConfig
+from .sts import STSConfig
 
-@dataclass
-class ServerConfig:
-    host: str
-    port: int
-    token: str
-    storage_endpoint: str
-    storage_bucket: str
-    storage_region: str
-    storage_access_key: str
-    storage_secret_key: str
-    storage_session_token: str
-    storage_provider: str
-    storage_sts_role_arn: str
-    storage_sts_policy: str
-    storage_sts_duration: int
+
+@dataclass(frozen=True)
+class AppConfig:
+    server: ServerConfig
+    storage: StorageConfig
+    sts: STSConfig
     db_path: str
     log_level: str
 
@@ -39,20 +33,26 @@ def parse_args():
     parser.add_argument("--db-path", default="data/media.db", help="SQLite DB path")
     parser.add_argument("--log-level", default="info", help="Log level: debug/info/warning/error/critical")
     args = parser.parse_args()
-    return ServerConfig(
-        host=args.host,
-        port=args.port,
-        token=args.token,
-        storage_endpoint=args.storage_endpoint,
-        storage_bucket=args.storage_bucket,
-        storage_region=args.storage_region,
-        storage_access_key=args.storage_access_key,
-        storage_secret_key=args.storage_secret_key,
-        storage_session_token=args.storage_session_token,
-        storage_provider=args.storage_provider,
-        storage_sts_role_arn=args.storage_sts_role_arn,
-        storage_sts_policy=args.storage_sts_policy,
-        storage_sts_duration=args.storage_sts_duration,
+    return AppConfig(
+        server=ServerConfig(
+            host=args.host,
+            port=args.port,
+            token=args.token,
+        ),
+        storage=StorageConfig(
+            endpoint=args.storage_endpoint,
+            bucket=args.storage_bucket,
+            region=args.storage_region,
+            access_key=args.storage_access_key,
+            secret_key=args.storage_secret_key,
+            session_token=args.storage_session_token,
+            provider=args.storage_provider,
+        ),
+        sts=STSConfig(
+            role_arn=args.storage_sts_role_arn,
+            policy=args.storage_sts_policy,
+            duration=args.storage_sts_duration,
+        ),
         db_path=args.db_path,
         log_level=args.log_level,
     )

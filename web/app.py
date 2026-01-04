@@ -1,17 +1,24 @@
-import argparse
 import os
 import sqlite3
 import sys
+from dataclasses import dataclass
 from datetime import datetime
 from urllib.parse import quote, urlparse
 from urllib.request import Request, urlopen
 
+import typer
 from flask import Flask, Response, jsonify, render_template, request, url_for
 
 repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(repo_root, "src"))
 
-from media_server.aws_sigv4 import aws_v4_headers
+from media_server.utils.aws_sigv4 import aws_v4_headers
+
+
+SELECT_FIELDS = """
+    id, workspace_id, fingerprint, tiny_fingerprint, object_key,
+    file_name, file_path, created_at
+"""
 
 
 def _encode_path(path):
@@ -51,27 +58,49 @@ def open_db(db_path):
     return conn
 
 
-def parse_args():
-    parser = argparse.ArgumentParser(description="Media browser for SQLite + MinIO")
-    parser.add_argument("--host", default="0.0.0.0", help="Bind host")
-    parser.add_argument("--port", type=int, default=8088, help="Bind port")
-    parser.add_argument("--db-path", default="data/media.db", help="SQLite DB path")
-    parser.add_argument("--storage-endpoint", default="http://127.0.0.1:9000", help="Object storage endpoint")
-    parser.add_argument("--storage-bucket", default="media", help="Object storage bucket")
-    parser.add_argument("--storage-region", default="us-east-1", help="Object storage region")
-    parser.add_argument("--storage-access-key", default="minioadmin", help="Object storage access key")
-    parser.add_argument("--storage-secret-key", default="minioadmin", help="Object storage secret key")
-    parser.add_argument("--storage-session-token", default="", help="Object storage session token")
-    return parser.parse_args()
+@dataclass
+class WebConfig:
+    host: str
+    port: int
+    db_path: str
+    storage_endpoint: str
+    storage_bucket: str
+    storage_region: str
+    storage_access_key: str
+    storage_secret_key: str
+    storage_session_token: str
+    storage_scheme: str = ""
+    storage_host: str = ""
 
 
-def create_app(config):
-    app = Flask(__name__)
+def parse_storage_endpoint(config):
     parsed = urlparse(config.storage_endpoint)
     if not parsed.scheme or not parsed.netloc:
         raise RuntimeError(f"invalid storage endpoint: {config.storage_endpoint}")
     config.storage_scheme = parsed.scheme
     config.storage_host = parsed.netloc
+
+
+def fetch_items(db_path, since_id=None):
+    query = f"""
+        SELECT {SELECT_FIELDS}
+        FROM media_files
+        WHERE object_key IS NOT NULL AND object_key != ''
+    """
+    params = ()
+    if since_id is not None:
+        query += " AND id > ?"
+        params = (since_id,)
+        query += " ORDER BY id ASC"
+    else:
+        query += " ORDER BY created_at DESC"
+    with open_db(db_path) as conn:
+        return conn.execute(query, params).fetchall()
+
+
+def create_app(config):
+    app = Flask(__name__)
+    parse_storage_endpoint(config)
 
     def _row_to_item(row):
         created = datetime.fromtimestamp(row["created_at"]).strftime("%Y-%m-%d %H:%M:%S")
@@ -79,15 +108,7 @@ def create_app(config):
 
     @app.route("/")
     def index():
-        with open_db(config.db_path) as conn:
-            rows = conn.execute(
-                """
-                SELECT id, workspace_id, fingerprint, tiny_fingerprint, object_key,
-                       file_name, file_path, created_at
-                FROM media_files
-                ORDER BY created_at DESC
-                """
-            ).fetchall()
+        rows = fetch_items(config.db_path)
         items = [_row_to_item(row) for row in rows]
         return render_template("index.html", items=items)
 
@@ -98,17 +119,7 @@ def create_app(config):
             since_id = int(since_id)
         except ValueError:
             return jsonify({"error": "invalid since_id"}), 400
-        with open_db(config.db_path) as conn:
-            rows = conn.execute(
-                """
-                SELECT id, workspace_id, fingerprint, tiny_fingerprint, object_key,
-                       file_name, file_path, created_at
-                FROM media_files
-                WHERE id > ?
-                ORDER BY id ASC
-                """,
-                (since_id,),
-            ).fetchall()
+        rows = fetch_items(config.db_path, since_id=since_id)
         items = [_row_to_item(row) for row in rows]
         return jsonify({"items": items})
 
@@ -121,7 +132,9 @@ def create_app(config):
         if status != 200:
             return Response(f"upstream status={status}", status=502)
         content_type = headers.get("Content-Type", "application/octet-stream")
-        return Response(body, status=200, content_type=content_type)
+        resp = Response(body, status=200, content_type=content_type)
+        resp.headers["Cache-Control"] = "no-store"
+        return resp
 
     @app.route("/delete", methods=["POST"])
     def delete_item():
@@ -138,11 +151,35 @@ def create_app(config):
     return app
 
 
-def main():
-    config = parse_args()
+cli = typer.Typer(add_completion=False)
+
+
+@cli.callback(invoke_without_command=True)
+def main(
+    host: str = typer.Option("0.0.0.0", "--host", help="Bind host"),
+    port: int = typer.Option(8088, "--port", help="Bind port"),
+    db_path: str = typer.Option("data/media.db", "--db-path", help="SQLite DB path"),
+    storage_endpoint: str = typer.Option("http://127.0.0.1:9000", "--storage-endpoint", help="Object storage endpoint"),
+    storage_bucket: str = typer.Option("media", "--storage-bucket", help="Object storage bucket"),
+    storage_region: str = typer.Option("us-east-1", "--storage-region", help="Object storage region"),
+    storage_access_key: str = typer.Option("minioadmin", "--storage-access-key", help="Object storage access key"),
+    storage_secret_key: str = typer.Option("minioadmin", "--storage-secret-key", help="Object storage secret key"),
+    storage_session_token: str = typer.Option("", "--storage-session-token", help="Object storage session token"),
+):
+    config = WebConfig(
+        host,
+        port,
+        db_path,
+        storage_endpoint,
+        storage_bucket,
+        storage_region,
+        storage_access_key,
+        storage_secret_key,
+        storage_session_token,
+    )
     app = create_app(config)
     app.run(host=config.host, port=config.port)
 
 
 if __name__ == "__main__":
-    main()
+    cli()

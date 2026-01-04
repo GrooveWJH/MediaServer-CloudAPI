@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-import argparse
 import json
 import os
 import sys
@@ -8,10 +7,11 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import quote, urlparse
 from urllib.request import Request, urlopen
 
+import typer
 repo_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 sys.path.insert(0, os.path.join(repo_root, "src"))
 
-from media_server.aws_sigv4 import aws_v4_headers
+from media_server.utils.aws_sigv4 import aws_v4_headers
 
 
 def _encode_path(path):
@@ -54,16 +54,18 @@ def s3_put(endpoint, bucket, object_key, region, access_key, secret_key, session
         return resp.status, resp.read()
 
 
-def main():
-    parser = argparse.ArgumentParser(description="STS PUT test against MinIO")
-    parser.add_argument("--media-host", default="http://127.0.0.1:8090", help="Media server base URL")
-    parser.add_argument("--workspace-id", required=True, help="Workspace ID")
-    parser.add_argument("--token", default="demo-token", help="x-auth-token for media server")
-    parser.add_argument("--payload", default="hello-sts-put", help="Payload string to upload")
-    args = parser.parse_args()
+cli = typer.Typer(add_completion=False)
 
-    sts_url = f"{args.media_host}/storage/api/v1/workspaces/{args.workspace_id}/sts"
-    data = request_json(sts_url, args.token)
+
+@cli.callback(invoke_without_command=True)
+def main(
+    media_host: str = typer.Option("http://127.0.0.1:8090", "--media-host", help="Media server base URL"),
+    workspace_id: str = typer.Option(..., "--workspace-id", help="Workspace ID"),
+    token: str = typer.Option("demo-token", "--token", help="x-auth-token for media server"),
+    payload: str = typer.Option("hello-sts-put", "--payload", help="Payload string to upload"),
+):
+    sts_url = f"{media_host}/storage/api/v1/workspaces/{workspace_id}/sts"
+    data = request_json(sts_url, token)
     if data.get("code") != 0:
         raise RuntimeError(f"sts failed: {data}")
 
@@ -74,7 +76,7 @@ def main():
     region = sts["region"]
 
     object_key = f"{sts['object_key_prefix']}test-{datetime.now(timezone.utc).strftime('%Y%m%d-%H%M%S')}.txt"
-    payload = args.payload.encode("utf-8")
+    payload = payload.encode("utf-8")
 
     has_token = bool(creds.get("security_token") or creds.get("session_token"))
     print(f"[test] endpoint={endpoint} bucket={bucket} region={region}")
@@ -102,7 +104,7 @@ def main():
 
 if __name__ == "__main__":
     try:
-        main()
+        cli()
     except Exception as exc:
         print(f"[test] ERROR: {exc}", file=sys.stderr)
         sys.exit(1)
