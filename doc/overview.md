@@ -56,6 +56,7 @@
 表：`media_files`
 
 字段：
+
 - `workspace_id`（分区维度）
 - `fingerprint`（完整指纹，唯一）
 - `tiny_fingerprint`（精简指纹）
@@ -64,20 +65,23 @@
 - `created_at`
 
 索引：
+
 - `UNIQUE(workspace_id, fingerprint)`
 - `idx_media_tiny(workspace_id, tiny_fingerprint)`
 
 写入时机：
+
 - 仅在 `upload-callback` 时写入（确保文件真实上传成功）
 
 删除时机：
+
 - `fast-upload` / `tiny-fingerprints` 中 HEAD 失败会删除对应记录
 
 ## object_key 规则
 
 当前规则：
 
-```
+```txt
 media/{workspace_id}/{YYYYMMDD}/{filename}
 ```
 

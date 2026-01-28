@@ -21,6 +21,7 @@ bash deploy/setup.sh
 ```
 
 脚本会：
+
 - 同步项目到 `/opt/mediaserver/MediaServer-CloudAPI`
 - 启动 MinIO（Docker Compose）
 - 自动创建 `media` bucket
@@ -63,7 +64,7 @@ docker run -d --name fc-minio --restart unless-stopped \
 mkdir -p /tmp/mc
 
 docker run --rm -v /tmp/mc:/root/.mc minio/mc \
-  alias set local http://<你的电脑IP>:9000 minioadmin minioadmin
+alias set local http://<你的电脑IP>:9000 minioadmin minioadmin
 
 docker run --rm -v /tmp/mc:/root/.mc minio/mc mb local/media
 ```
@@ -145,6 +146,7 @@ python3 web/app.py \
 ## Linux 部署（高级）
 
 以下方案提供三件事：
+
 1) MinIO 使用 Docker Compose 常驻
 2) `server.py` 使用 systemd 开机自启
 3) Web 浏览器使用 systemd 开机自启（可选）
@@ -168,6 +170,7 @@ sudo nano /opt/mediaserver/MediaServer-CloudAPI/deploy/media-server.env
 ```
 
 确认以下字段：
+
 - `STORAGE_ENDPOINT` 建议使用本机可达地址（如 `http://127.0.0.1:9000`）
 - `DB_PATH` 建议放到持久化目录（如 `/opt/mediaserver/data/media.db`）
 - `MEDIA_SERVER_TOKEN` 与 Pilot2 配置一致
