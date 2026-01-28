@@ -1,3 +1,4 @@
+from lib.aws_sigv4 import aws_v4_headers
 import argparse
 import os
 import sqlite3
@@ -7,8 +8,6 @@ from urllib.request import Request, urlopen
 
 repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(repo_root, "src"))
-
-from media_server.utils.aws_sigv4 import aws_v4_headers
 
 
 def _encode_path(path):
@@ -33,7 +32,8 @@ def s3_request(config, method, object_key, payload=b""):
         payload,
         extra_headers,
     )
-    req = Request(url, data=payload if method in {"PUT", "POST"} else None, headers=headers, method=method)
+    req = Request(url, data=payload if method in {
+                  "PUT", "POST"} else None, headers=headers, method=method)
     with urlopen(req, timeout=15) as resp:
         return resp.status, resp.read(), resp.headers
 
@@ -45,16 +45,26 @@ def open_db(db_path):
 
 
 def parse_args():
-    parser = argparse.ArgumentParser(description="Fetch one object from SQLite + MinIO")
-    parser.add_argument("--db-path", default="data/media.db", help="SQLite DB path")
-    parser.add_argument("--storage-endpoint", default="http://127.0.0.1:9000", help="Object storage endpoint")
-    parser.add_argument("--storage-bucket", default="media", help="Object storage bucket")
-    parser.add_argument("--storage-region", default="us-east-1", help="Object storage region")
-    parser.add_argument("--storage-access-key", default="minioadmin", help="Object storage access key")
-    parser.add_argument("--storage-secret-key", default="minioadmin", help="Object storage secret key")
-    parser.add_argument("--storage-session-token", default="", help="Object storage session token")
-    parser.add_argument("--object-key", default="", help="Optional object_key override")
-    parser.add_argument("--output", default="", help="Output filename (default from object_key)")
+    parser = argparse.ArgumentParser(
+        description="Fetch one object from SQLite + MinIO")
+    parser.add_argument("--db-path", default="data/media.db",
+                        help="SQLite DB path")
+    parser.add_argument(
+        "--storage-endpoint", default="http://127.0.0.1:9000", help="Object storage endpoint")
+    parser.add_argument("--storage-bucket", default="media",
+                        help="Object storage bucket")
+    parser.add_argument("--storage-region",
+                        default="us-east-1", help="Object storage region")
+    parser.add_argument("--storage-access-key",
+                        default="minioadmin", help="Object storage access key")
+    parser.add_argument("--storage-secret-key",
+                        default="minioadmin", help="Object storage secret key")
+    parser.add_argument("--storage-session-token", default="",
+                        help="Object storage session token")
+    parser.add_argument("--object-key", default="",
+                        help="Optional object_key override")
+    parser.add_argument("--output", default="",
+                        help="Output filename (default from object_key)")
     return parser.parse_args()
 
 
@@ -62,7 +72,8 @@ def main():
     config = parse_args()
     parsed = urlparse(config.storage_endpoint)
     if not parsed.scheme or not parsed.netloc:
-        raise RuntimeError(f"invalid storage endpoint: {config.storage_endpoint}")
+        raise RuntimeError(
+            f"invalid storage endpoint: {config.storage_endpoint}")
     config.storage_scheme = parsed.scheme
     config.storage_host = parsed.netloc
 

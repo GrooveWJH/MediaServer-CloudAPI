@@ -1,3 +1,4 @@
+from lib.aws_sigv4 import aws_v4_headers
 import os
 import sqlite3
 import sys
@@ -7,12 +8,10 @@ from urllib.parse import quote, urlparse
 from urllib.request import Request, urlopen
 
 import typer
-from flask import Flask, Response, jsonify, render_template, request, url_for
+from flask import Flask, Response, jsonify, render_template, request
 
 repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(repo_root, "src"))
-
-from media_server.utils.aws_sigv4 import aws_v4_headers
 
 
 SELECT_FIELDS = """
@@ -47,7 +46,8 @@ def s3_request(config, method, object_key, payload=b""):
     canonical_uri = _encode_path(path)
     url = f"{config.storage_scheme}://{config.storage_host}{canonical_uri}"
     headers = build_s3_headers(config, method, canonical_uri, payload)
-    req = Request(url, data=payload if method in {"PUT", "POST"} else None, headers=headers, method=method)
+    req = Request(url, data=payload if method in {
+                  "PUT", "POST"} else None, headers=headers, method=method)
     with urlopen(req, timeout=30) as resp:
         return resp.status, resp.read(), resp.headers
 
@@ -76,7 +76,8 @@ class WebConfig:
 def parse_storage_endpoint(config):
     parsed = urlparse(config.storage_endpoint)
     if not parsed.scheme or not parsed.netloc:
-        raise RuntimeError(f"invalid storage endpoint: {config.storage_endpoint}")
+        raise RuntimeError(
+            f"invalid storage endpoint: {config.storage_endpoint}")
     config.storage_scheme = parsed.scheme
     config.storage_host = parsed.netloc
 
@@ -103,7 +104,8 @@ def create_app(config):
     parse_storage_endpoint(config)
 
     def _row_to_item(row):
-        created = datetime.fromtimestamp(row["created_at"]).strftime("%Y-%m-%d %H:%M:%S")
+        created = datetime.fromtimestamp(
+            row["created_at"]).strftime("%Y-%m-%d %H:%M:%S")
         return {**dict(row), "created_at": created}
 
     @app.route("/")
@@ -158,13 +160,20 @@ cli = typer.Typer(add_completion=False)
 def main(
     host: str = typer.Option("0.0.0.0", "--host", help="Bind host"),
     port: int = typer.Option(8088, "--port", help="Bind port"),
-    db_path: str = typer.Option("data/media.db", "--db-path", help="SQLite DB path"),
-    storage_endpoint: str = typer.Option("http://127.0.0.1:9000", "--storage-endpoint", help="Object storage endpoint"),
-    storage_bucket: str = typer.Option("media", "--storage-bucket", help="Object storage bucket"),
-    storage_region: str = typer.Option("us-east-1", "--storage-region", help="Object storage region"),
-    storage_access_key: str = typer.Option("minioadmin", "--storage-access-key", help="Object storage access key"),
-    storage_secret_key: str = typer.Option("minioadmin", "--storage-secret-key", help="Object storage secret key"),
-    storage_session_token: str = typer.Option("", "--storage-session-token", help="Object storage session token"),
+    db_path: str = typer.Option(
+        "data/media.db", "--db-path", help="SQLite DB path"),
+    storage_endpoint: str = typer.Option(
+        "http://127.0.0.1:9000", "--storage-endpoint", help="Object storage endpoint"),
+    storage_bucket: str = typer.Option(
+        "media", "--storage-bucket", help="Object storage bucket"),
+    storage_region: str = typer.Option(
+        "us-east-1", "--storage-region", help="Object storage region"),
+    storage_access_key: str = typer.Option(
+        "minioadmin", "--storage-access-key", help="Object storage access key"),
+    storage_secret_key: str = typer.Option(
+        "minioadmin", "--storage-secret-key", help="Object storage secret key"),
+    storage_session_token: str = typer.Option(
+        "", "--storage-session-token", help="Object storage session token"),
 ):
     config = WebConfig(
         host,
