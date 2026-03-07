@@ -7,6 +7,7 @@
 - [快速开始（推荐）](#快速开始推荐)
 - [手动部署（开发/本机）](#手动部署开发本机)
 - [Linux 部署（高级）](#linux-部署高级)
+- [架构与链路（PlantUML）](#架构与链路plantuml)
 - [验证流程](#验证流程)
 - [调试指南](#调试指南)
 - [目录结构](#目录结构)
@@ -27,6 +28,20 @@ bash deploy/setup.sh
 - 自动创建 `media` bucket
 - 启动并启用 `media-server` 与 `media-web` systemd 服务
 - 输出执行摘要
+
+如果你在开发机/边缘设备上不想安装 systemd 服务，可以使用“本地一键管理脚本”：
+
+```bash
+chmod +x deploy/one_click.sh
+./deploy/one_click.sh start
+./deploy/one_click.sh check
+```
+
+常用命令：
+
+- `./deploy/one_click.sh status` 查看三组件状态（MinIO / media-server / media-web）
+- `./deploy/one_click.sh logs` 持续查看服务日志
+- `./deploy/one_click.sh stop` 一键停止
 
 ## 手动部署（开发/本机）
 
@@ -195,6 +210,76 @@ sudo systemctl start media-web.service
 ```bash
 sudo journalctl -u media-server.service -f
 sudo journalctl -u media-web.service -f
+```
+
+## 架构与链路（PlantUML）
+
+### 1) 组件架构图
+
+```plantuml
+@startuml
+title MediaServer-CloudAPI 组件架构
+
+actor "DJI Pilot2 / RC" as RC
+actor "浏览器用户" as User
+
+node "Host Machine" {
+  component "media-server\n(src/media_server/server.py)\n:8090" as MediaServer
+  component "media-web\n(web/app.py)\n:8088" as MediaWeb
+  database "SQLite\n(DB_PATH)" as DB
+  component "MinIO\n(API:9000 / Console:9001)" as MinIO
+}
+
+RC --> MediaServer : x-auth-token + 业务请求\n/sts /fast-upload /tiny-fingerprints /upload-callback
+MediaServer --> MinIO : STS / S3 API
+MediaServer --> DB : 持久化媒体元数据\nfingerprint/tiny_fingerprint
+
+User --> MediaWeb : HTTP 访问页面
+MediaWeb --> DB : 查询 media_files
+MediaWeb --> MinIO : 预览/删除对象（SigV4）
+
+@enduml
+```
+
+### 2) 上传主链路时序图
+
+```plantuml
+@startuml
+title Pilot2 上传主链路（STS + 回调）
+
+actor Pilot2
+participant "media-server" as S
+participant "MinIO" as M
+database "SQLite" as D
+participant "media-web" as W
+actor Browser
+
+Pilot2 -> S : POST /storage/.../sts
+S -> M : AssumeRole/Get STS credentials
+M --> S : 临时 AK/SK/Token
+S --> Pilot2 : STS 响应
+
+Pilot2 -> S : POST /media/.../fast-upload
+S -> D : 记录文件元信息/指纹
+S --> Pilot2 : ok
+
+Pilot2 -> S : POST /media/.../tiny-fingerprints
+S -> D : 查重 tiny_fingerprint
+S --> Pilot2 : 去重结果
+
+Pilot2 -> M : PUT object (直传)
+M --> Pilot2 : 200 OK
+
+Pilot2 -> S : POST /media/.../upload-callback
+S -> D : 更新 object_key / 状态
+S --> Pilot2 : ok
+
+Browser -> W : GET /
+W -> D : 查询媒体记录
+W -> M : GET / DELETE object（按需）
+W --> Browser : 展示图片/删除结果
+
+@enduml
 ```
 
 ## 验证流程
