@@ -10,3 +10,6 @@ class StorageConfig:
     secret_key: str
     session_token: str
     provider: str
+    public_endpoint: str = ""
+    public_port: int = 9000
+    trust_forwarded_headers: bool = False

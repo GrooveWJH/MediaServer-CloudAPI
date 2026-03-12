@@ -40,6 +40,21 @@ def run(
     storage_secret_key: str = typer.Option("minioadmin", "--storage-secret-key", help="Object storage secret key"),
     storage_session_token: str = typer.Option("", "--storage-session-token", help="Object storage session token"),
     storage_provider: str = typer.Option("minio", "--storage-provider", help="Object storage provider"),
+    storage_public_endpoint: str = typer.Option(
+        "",
+        "--storage-public-endpoint",
+        help="Public object storage endpoint returned to clients in STS response",
+    ),
+    storage_public_port: int = typer.Option(
+        9000,
+        "--storage-public-port",
+        help="Public object storage endpoint port when Host has no explicit port",
+    ),
+    trust_forwarded_headers: str = typer.Option(
+        "false",
+        "--trust-forwarded-headers",
+        help="Trust X-Forwarded-Host/Proto headers for public endpoint resolution (true/false)",
+    ),
     storage_sts_role_arn: str = typer.Option(
         "arn:aws:iam::minio:role/dji-pilot", "--storage-sts-role-arn", help="MinIO STS role ARN"
     ),
@@ -70,6 +85,12 @@ def run(
         storage_session_token,
         "--storage-provider",
         storage_provider,
+        "--storage-public-endpoint",
+        storage_public_endpoint,
+        "--storage-public-port",
+        str(storage_public_port),
+        "--trust-forwarded-headers",
+        trust_forwarded_headers,
         "--storage-sts-role-arn",
         storage_sts_role_arn,
         "--storage-sts-policy",

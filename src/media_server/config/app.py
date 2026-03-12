@@ -15,6 +15,15 @@ class AppConfig:
     log_level: str
 
 
+def parse_bool(value):
+    lowered = str(value).strip().lower()
+    if lowered in {"1", "true", "yes", "y", "on"}:
+        return True
+    if lowered in {"0", "false", "no", "n", "off"}:
+        return False
+    raise argparse.ArgumentTypeError(f"invalid boolean value: {value}")
+
+
 def parse_args():
     parser = argparse.ArgumentParser(description="DJI Media Management Server (Fast Upload)")
     parser.add_argument("--host", default="0.0.0.0", help="Bind host")
@@ -27,6 +36,23 @@ def parse_args():
     parser.add_argument("--storage-secret-key", default="minioadmin", help="Object storage secret key")
     parser.add_argument("--storage-session-token", default="", help="Object storage session token")
     parser.add_argument("--storage-provider", default="minio", help="Object storage provider")
+    parser.add_argument(
+        "--storage-public-endpoint",
+        default="",
+        help="Public object storage endpoint returned to clients in STS response",
+    )
+    parser.add_argument(
+        "--storage-public-port",
+        type=int,
+        default=9000,
+        help="Public object storage endpoint port when Host has no explicit port",
+    )
+    parser.add_argument(
+        "--trust-forwarded-headers",
+        type=parse_bool,
+        default=False,
+        help="Trust X-Forwarded-Host/Proto headers for public endpoint resolution",
+    )
     parser.add_argument("--storage-sts-role-arn", default="arn:aws:iam::minio:role/dji-pilot", help="MinIO STS role ARN")
     parser.add_argument("--storage-sts-policy", default="", help="MinIO STS policy JSON")
     parser.add_argument("--storage-sts-duration", type=int, default=3600, help="MinIO STS duration seconds")
@@ -47,6 +73,9 @@ def parse_args():
             secret_key=args.storage_secret_key,
             session_token=args.storage_session_token,
             provider=args.storage_provider,
+            public_endpoint=args.storage_public_endpoint,
+            public_port=args.storage_public_port,
+            trust_forwarded_headers=args.trust_forwarded_headers,
         ),
         sts=STSConfig(
             role_arn=args.storage_sts_role_arn,
