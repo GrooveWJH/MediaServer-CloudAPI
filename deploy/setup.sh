@@ -9,13 +9,10 @@ GRAY="\033[90m"
 RESET="\033[0m"
 
 say() { printf "%b\n" "$1"; }
-say_err() { printf "%b\n" "$1" >&2; }
 ok() { say "${GREEN}OK${RESET} $1"; }
 warn() { say "${YELLOW}WARN${RESET} $1"; }
 err() { say "${RED}ERR${RESET} $1"; }
 info() { say "${BLUE}INFO${RESET} $1"; }
-warn_err() { say_err "${YELLOW}WARN${RESET} $1"; }
-info_err() { say_err "${BLUE}INFO${RESET} $1"; }
 
 require_sudo() {
   if ! sudo -v; then
@@ -30,54 +27,6 @@ get_user() {
   else
     echo "${USER}"
   fi
-}
-
-detect_ips() {
-  if command -v hostname >/dev/null 2>&1; then
-    hostname -I 2>/dev/null | tr ' ' '\n' | sed '/^$/d'
-    return
-  fi
-  if command -v ip >/dev/null 2>&1; then
-    ip -4 addr show | awk '/inet /{print $2}' | cut -d/ -f1 | grep -v '^127\.' || true
-  fi
-}
-
-choose_ip() {
-  local ips
-  mapfile -t ips < <(detect_ips)
-  if [[ ${#ips[@]} -eq 0 ]]; then
-    warn_err "No LAN IP detected"
-  else
-    info_err "Detected IPs:"
-    for i in "${!ips[@]}"; do
-      say_err "  [$((i+1))] ${ips[$i]}"
-    done
-  fi
-
-  while true; do
-    say_err ""
-    read -r -p "Select IP source: 1=Use detected LAN IP, 2=Enter custom IP: " choice >&2
-    case "${choice}" in
-      1)
-        if [[ ${#ips[@]} -eq 0 ]]; then
-          warn_err "No LAN IP available, choose custom"
-          continue
-        fi
-        echo "${ips[0]}"
-        return
-        ;;
-      2)
-        read -r -p "Enter IP address: " custom_ip
-        if [[ -n "${custom_ip}" ]]; then
-          echo "${custom_ip}"
-          return
-        fi
-        ;;
-      *)
-        warn_err "Invalid choice"
-        ;;
-    esac
-  done
 }
 
 confirm() {
@@ -113,6 +62,8 @@ ensure_bucket() {
   local secret_key="$3"
   local bucket="$4"
   local mc_config_dir="$5"
+  local retries=10
+  local wait_sec=2
 
   info "Ensuring bucket exists: ${bucket}"
   if ! docker image inspect minio/mc:latest >/dev/null 2>&1; then
@@ -121,10 +72,16 @@ ensure_bucket() {
   fi
 
   sudo mkdir -p "${mc_config_dir}"
-  sudo docker run --rm -v "${mc_config_dir}:/root/.mc" minio/mc \
-    alias set local "${endpoint}" "${access_key}" "${secret_key}" >/dev/null
-  sudo docker run --rm -v "${mc_config_dir}:/root/.mc" minio/mc \
-    mb --ignore-existing "local/${bucket}" >/dev/null
+  for _ in $(seq 1 "${retries}"); do
+    if sudo docker run --rm -v "${mc_config_dir}:/root/.mc" minio/mc \
+      alias set local "${endpoint}" "${access_key}" "${secret_key}" >/dev/null 2>&1 \
+      && sudo docker run --rm -v "${mc_config_dir}:/root/.mc" minio/mc \
+      mb --ignore-existing "local/${bucket}" >/dev/null 2>&1; then
+      return 0
+    fi
+    sleep "${wait_sec}"
+  done
+  return 1
 }
 
 print_summary() {
@@ -188,6 +145,10 @@ install_or_update() {
   local storage_region="us-east-1"
   local storage_access_key="minioadmin"
   local storage_secret_key="minioadmin"
+  local storage_endpoint_internal="http://127.0.0.1:9000"
+  local storage_public_endpoint=""
+  local storage_public_port="9000"
+  local trust_forwarded_headers="false"
   local storage_sts_role_arn="arn:aws:iam::minio:role/dji-pilot"
   local storage_sts_policy=""
   local storage_sts_duration="3600"
@@ -205,21 +166,16 @@ install_or_update() {
   sudo chown -R "${user_name}:${user_name}" "${target_root}"
   actions+=("synced repository to ${target_root}")
 
-  local storage_ip
-  storage_ip="$(choose_ip)"
-  if [[ -z "${storage_ip}" ]]; then
-    err "No IP selected; aborting setup"
-    exit 1
-  fi
-  info "Selected IP: ${storage_ip}"
-
   info "Writing environment file"
   sudo tee "${target_root}/deploy/media-server.env" >/dev/null <<EOF
 MEDIA_SERVER_HOST=0.0.0.0
 MEDIA_SERVER_PORT=8090
 MEDIA_SERVER_TOKEN=demo-token
 
-STORAGE_ENDPOINT=http://${storage_ip}:9000
+STORAGE_ENDPOINT=${storage_endpoint_internal}
+STORAGE_PUBLIC_ENDPOINT=${storage_public_endpoint}
+STORAGE_PUBLIC_PORT=${storage_public_port}
+TRUST_FORWARDED_HEADERS=${trust_forwarded_headers}
 STORAGE_BUCKET=${storage_bucket}
 STORAGE_REGION=${storage_region}
 STORAGE_ACCESS_KEY=${storage_access_key}
@@ -234,7 +190,8 @@ LOG_LEVEL=${log_level}
 WEB_PORT=8088
 EOF
   actions+=("wrote ${target_root}/deploy/media-server.env")
-  ok "STORAGE_ENDPOINT set to http://${storage_ip}:9000"
+  ok "STORAGE_ENDPOINT set to ${storage_endpoint_internal}"
+  info "STS public endpoint mode: auto by request headers (public port ${storage_public_port})"
 
   info "Writing MinIO compose env"
   sudo tee "${target_root}/deploy/.env" >/dev/null <<EOF
@@ -281,8 +238,12 @@ EOF
   source "${target_root}/deploy/media-server.env"
   set +a
   if wait_for_minio "${STORAGE_ENDPOINT}"; then
-    ensure_bucket "${STORAGE_ENDPOINT}" "${STORAGE_ACCESS_KEY}" "${STORAGE_SECRET_KEY}" "${STORAGE_BUCKET}" "${target_root}/deploy/.mc"
-    actions+=("created bucket ${STORAGE_BUCKET} (if missing)")
+    if ensure_bucket "${STORAGE_ENDPOINT}" "${STORAGE_ACCESS_KEY}" "${STORAGE_SECRET_KEY}" "${STORAGE_BUCKET}" "${target_root}/deploy/.mc"; then
+      actions+=("created bucket ${STORAGE_BUCKET} (if missing)")
+    else
+      warn "Bucket init failed after retries; continue (compose minio-init may still create bucket)"
+      actions+=("skipped bucket creation (mc alias/mb failed)")
+    fi
   else
     warn "MinIO not ready; skipped bucket creation"
     actions+=("skipped bucket creation (MinIO not ready)")

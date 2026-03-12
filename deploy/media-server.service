@@ -6,6 +6,9 @@ Wants=network.target
 [Service]
 Type=simple
 WorkingDirectory=/opt/mediaserver/MediaServer-CloudAPI
+Environment=STORAGE_PUBLIC_ENDPOINT=
+Environment=STORAGE_PUBLIC_PORT=9000
+Environment=TRUST_FORWARDED_HEADERS=false
 EnvironmentFile=/opt/mediaserver/MediaServer-CloudAPI/deploy/media-server.env
 Environment=PYTHONPATH=/opt/mediaserver/MediaServer-CloudAPI/src
 ExecStart=/usr/bin/python3 /opt/mediaserver/MediaServer-CloudAPI/src/media_server/server.py \
@@ -17,6 +20,9 @@ ExecStart=/usr/bin/python3 /opt/mediaserver/MediaServer-CloudAPI/src/media_serve
   --storage-region ${STORAGE_REGION} \
   --storage-access-key ${STORAGE_ACCESS_KEY} \
   --storage-secret-key ${STORAGE_SECRET_KEY} \
+  --storage-public-endpoint ${STORAGE_PUBLIC_ENDPOINT} \
+  --storage-public-port ${STORAGE_PUBLIC_PORT} \
+  --trust-forwarded-headers ${TRUST_FORWARDED_HEADERS} \
   --storage-sts-role-arn ${STORAGE_STS_ROLE_ARN} \
   --storage-sts-policy ${STORAGE_STS_POLICY} \
   --storage-sts-duration ${STORAGE_STS_DURATION} \

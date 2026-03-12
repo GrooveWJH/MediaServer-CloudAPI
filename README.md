@@ -26,6 +26,7 @@ bash deploy/setup.sh
 - 同步项目到 `/opt/mediaserver/MediaServer-CloudAPI`
 - 启动 MinIO（Docker Compose）
 - 自动创建 `media` bucket
+- 默认写入 `STORAGE_ENDPOINT=http://127.0.0.1:9000`（服务端内部访问）
 - 启动并启用 `media-server` 与 `media-web` systemd 服务
 - 输出执行摘要
 
@@ -79,7 +80,7 @@ docker run -d --name fc-minio --restart unless-stopped \
 mkdir -p /tmp/mc
 
 docker run --rm -v /tmp/mc:/root/.mc minio/mc \
-alias set local http://<你的电脑IP>:9000 minioadmin minioadmin
+alias set local http://127.0.0.1:9000 minioadmin minioadmin
 
 docker run --rm -v /tmp/mc:/root/.mc minio/mc mb local/media
 ```
@@ -88,31 +89,37 @@ docker run --rm -v /tmp/mc:/root/.mc minio/mc mb local/media
 
 ### 3) 启动媒体管理服务
 
-把 `storage-endpoint` 指向你电脑的局域网 IP（RC 需要访问），服务端会向 MinIO STS 申请临时凭证：
+`storage-endpoint` 只用于服务端访问 MinIO，推荐固定本机 `127.0.0.1`。
+返回给 RC 的上传 endpoint 会按请求头自动推导（默认来自 `Host`，可选信任 `X-Forwarded-*`）：
 
 ```bash
 python3 src/media_server/server.py \
   --host 0.0.0.0 --port 8090 --token demo-token \
-  --storage-endpoint http://<你的电脑IP>:9000 \
+  --storage-endpoint http://127.0.0.1:9000 \
   --storage-bucket media \
   --storage-region us-east-1 \
   --storage-access-key minioadmin \
   --storage-secret-key minioadmin \
+  --storage-public-port 9000 \
+  --trust-forwarded-headers false \
   --storage-sts-role-arn arn:aws:iam::minio:role/dji-pilot \
   --db-path data/media.db \
   --log-level info
 ```
 
-精简指令（只改 IP）：
+精简指令（默认自动适配 IP）：
 
 ```bash
 python3 src/media_server/server.py \
-  --storage-endpoint http://<你的电脑IP>:9000
+  --storage-endpoint http://127.0.0.1:9000
 ```
 
 参数说明：
 
-- `storage-endpoint` 用你电脑的局域网 IP，RC 才能连到
+- `storage-endpoint` 是服务端访问 MinIO 的内部地址，推荐 `http://127.0.0.1:9000`
+- `storage-public-endpoint` 可选，显式固定 STS 返回地址（例如 `http://192.168.10.228:9000`）
+- `storage-public-port` 当 `Host` 里未带端口时，STS 返回用这个端口（默认 `9000`）
+- `trust-forwarded-headers` 是否信任 `X-Forwarded-Host/Proto`（默认 `false`）
 - `storage-access-key/secret-key` 与 MinIO 启动参数一致
 - `storage-provider` 默认 `minio`（对应 DJI 的 OssTypeEnum）
 - `storage-sts-role-arn` 为 STS 颁发临时凭证使用的 RoleArn（MinIO 不强校验，可保持默认）
@@ -142,18 +149,18 @@ python3 -m pip install flask
 ```bash
 python3 web/app.py \
   --db-path data/media.db \
-  --storage-endpoint http://<你的电脑IP>:9000 \
+  --storage-endpoint http://127.0.0.1:9000 \
   --storage-bucket media \
   --storage-region us-east-1 \
   --storage-access-key minioadmin \
   --storage-secret-key minioadmin
 ```
 
-精简指令（只改 IP）：
+精简指令：
 
 ```bash
 python3 web/app.py \
-  --storage-endpoint http://<你的电脑IP>:9000
+  --storage-endpoint http://127.0.0.1:9000
 ```
 
 访问：`http://<你的电脑IP>:8088`
@@ -186,7 +193,10 @@ sudo nano /opt/mediaserver/MediaServer-CloudAPI/deploy/media-server.env
 
 确认以下字段：
 
-- `STORAGE_ENDPOINT` 建议使用本机可达地址（如 `http://127.0.0.1:9000`）
+- `STORAGE_ENDPOINT` 固定本机 MinIO 地址（推荐 `http://127.0.0.1:9000`）
+- `STORAGE_PUBLIC_ENDPOINT` 可选，固定 RC 上传地址；为空则自动按请求头推导
+- `STORAGE_PUBLIC_PORT` 默认 `9000`
+- `TRUST_FORWARDED_HEADERS` 默认 `false`（仅反向代理时设为 `true`）
 - `DB_PATH` 建议放到持久化目录（如 `/opt/mediaserver/data/media.db`）
 - `MEDIA_SERVER_TOKEN` 与 Pilot2 配置一致
 
@@ -305,6 +315,9 @@ curl -s http://127.0.0.1:8090/health
 [存储] 服务可达: http://<你的电脑IP>:9000 (200)
 ```
 
+换网后只需要让 RC 访问新的媒体服务地址（`http://<新IP>:8090`），
+通常不需要修改 `media-server.env` 里的 MinIO 地址。
+
 ### 3) Pilot2 自动上传
 
 在 Pilot2 上拍一张新照片，服务端日志应出现：
@@ -327,6 +340,27 @@ python3 src/media_server/scripts/test_sts_upload.py \
 
 脚本会执行 PUT/HEAD/DELETE。删除是预期行为，因此 MinIO 控制台里可能看不到对象。
 
+### 5) STS endpoint 自动适配检查
+
+```bash
+curl -s -X POST \
+  -H "x-auth-token: demo-token" \
+  -H "Content-Type: application/json" \
+  -d '{}' \
+  http://127.0.0.1:8090/storage/api/v1/workspaces/<你的workspace_id>/sts | jq '.data.endpoint'
+```
+
+如果你要模拟 RC 从某个 Host 访问：
+
+```bash
+curl -s -X POST \
+  -H "Host: 192.168.10.228:8090" \
+  -H "x-auth-token: demo-token" \
+  -H "Content-Type: application/json" \
+  -d '{}' \
+  http://127.0.0.1:8090/storage/api/v1/workspaces/<你的workspace_id>/sts | jq '.data.endpoint'
+```
+
 ## 调试指南
 
 ### 查看媒体服务日志
@@ -344,7 +378,7 @@ MinIO 默认日志不会输出每条请求，使用 `mc admin trace`：
 
 ```bash
 docker run --rm -v /tmp/mc:/root/.mc minio/mc \
-  alias set local http://<你的电脑IP>:9000 minioadmin minioadmin
+  alias set local http://127.0.0.1:9000 minioadmin minioadmin
 
 docker run --rm -v /tmp/mc:/root/.mc minio/mc \
   admin trace local --all
@@ -371,6 +405,9 @@ docker run --rm -v /tmp/mc:/root/.mc minio/mc \
 - 没有 `upload-callback`：上传未完成或上传失败
 - MinIO Console 看不到对象：自测脚本会 DELETE（正常）
 - RC 连不上：检查防火墙是否阻止 `8090/9000` 端口
+- 换网后上传失败：先确认 RC 访问的是新 `http://<新IP>:8090`，再检查 STS 返回 endpoint 是否跟随变更
+- 反向代理场景：设置 `TRUST_FORWARDED_HEADERS=true` 并确保代理透传 `X-Forwarded-Host/Proto`
+- 需要固定地址回退：设置 `STORAGE_PUBLIC_ENDPOINT=http://x.x.x.x:9000` 并重启 `media-server.service`
 - 指纹持久化位置：默认 `data/media.db`（`media_files` 同时存 fingerprint 与 tiny_fingerprint）
 
 ## 目录结构

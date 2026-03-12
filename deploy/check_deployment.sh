@@ -19,6 +19,48 @@ info() { say "${BLUE}INFO${RESET} $1"; }
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 ENV_FILE="${ROOT_DIR}/deploy/media-server.env"
+STS_WORKSPACE_ID=""
+STS_TOKEN=""
+MEDIA_HOST_OVERRIDE=""
+
+usage() {
+  cat <<'USAGE'
+Usage:
+  ./deploy/check_deployment.sh [--sts-workspace-id <id>] [--sts-token <token>] [--media-host <url>]
+
+Options:
+  --sts-workspace-id <id>  Optional: run STS quick-check using this workspace id
+  --sts-token <token>      Optional: token for STS quick-check (default MEDIA_SERVER_TOKEN from env)
+  --media-host <url>       Optional: media server base URL for STS quick-check
+  -h, --help               Show this help
+USAGE
+}
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --sts-workspace-id)
+      STS_WORKSPACE_ID="${2:-}"
+      shift 2
+      ;;
+    --sts-token)
+      STS_TOKEN="${2:-}"
+      shift 2
+      ;;
+    --media-host)
+      MEDIA_HOST_OVERRIDE="${2:-}"
+      shift 2
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *)
+      fail "Unknown argument: $1"
+      usage
+      exit 2
+      ;;
+  esac
+done
 
 if [[ -f "${ENV_FILE}" ]]; then
   info "Loading env: ${ENV_FILE}"
@@ -33,9 +75,34 @@ fi
 MEDIA_SERVER_PORT="${MEDIA_SERVER_PORT:-8090}"
 WEB_PORT="${WEB_PORT:-8088}"
 STORAGE_ENDPOINT="${STORAGE_ENDPOINT:-http://127.0.0.1:9000}"
+STORAGE_PUBLIC_ENDPOINT="${STORAGE_PUBLIC_ENDPOINT:-}"
+STORAGE_PUBLIC_PORT="${STORAGE_PUBLIC_PORT:-9000}"
+TRUST_FORWARDED_HEADERS="${TRUST_FORWARDED_HEADERS:-false}"
+MEDIA_SERVER_TOKEN="${MEDIA_SERVER_TOKEN:-demo-token}"
 MINIO_HEALTH_URL="${STORAGE_ENDPOINT%/}/minio/health/ready"
 MEDIA_HEALTH_URL="http://127.0.0.1:${MEDIA_SERVER_PORT}/health"
 WEB_URL="http://127.0.0.1:${WEB_PORT}/"
+MEDIA_HOST="${MEDIA_HOST_OVERRIDE:-http://127.0.0.1:${MEDIA_SERVER_PORT}}"
+if [[ -z "${STS_TOKEN}" ]]; then
+  STS_TOKEN="${MEDIA_SERVER_TOKEN}"
+fi
+
+run_with_timeout() {
+  local sec="$1"
+  shift
+  if command -v timeout >/dev/null 2>&1; then
+    timeout "${sec}" "$@"
+    return
+  fi
+  "$@"
+}
+
+print_endpoint_config() {
+  info "Endpoint config: STORAGE_ENDPOINT=${STORAGE_ENDPOINT}"
+  info "Endpoint config: STORAGE_PUBLIC_ENDPOINT=${STORAGE_PUBLIC_ENDPOINT:-<auto by headers>}"
+  info "Endpoint config: STORAGE_PUBLIC_PORT=${STORAGE_PUBLIC_PORT}"
+  info "Endpoint config: TRUST_FORWARDED_HEADERS=${TRUST_FORWARDED_HEADERS}"
+}
 
 require_cmd() {
   local cmd="$1"
@@ -105,10 +172,10 @@ check_docker_runtime() {
     return
   fi
 
-  if docker info >/dev/null 2>&1; then
+  if run_with_timeout 8 docker info >/dev/null 2>&1; then
     ok "Docker daemon is reachable"
   else
-    fail "Docker daemon unreachable (is service running and current user in docker group?)"
+    fail "Docker daemon unreachable or timed out (is service running, user in docker group, DOCKER_HOST valid?)"
   fi
 
   if docker compose version >/dev/null 2>&1; then
@@ -165,13 +232,76 @@ if data.get("message") != "ok":
     raise SystemExit(3)
 if not isinstance(data.get("data"), dict):
     raise SystemExit(4)
-print("ok")
 PY
   then
     ok "Media health response is valid JSON: ${MEDIA_HEALTH_URL}"
   else
     fail "Media health response format invalid: ${MEDIA_HEALTH_URL} body=${body}"
   fi
+}
+
+check_sts_quickcheck() {
+  if [[ -z "${STS_WORKSPACE_ID}" ]]; then
+    info "Skip STS quick-check (no --sts-workspace-id provided)"
+    return
+  fi
+  if [[ -z "${STS_TOKEN}" ]]; then
+    warn "Skip STS quick-check (missing --sts-token and MEDIA_SERVER_TOKEN)"
+    return
+  fi
+
+  local sts_url body
+  sts_url="${MEDIA_HOST%/}/storage/api/v1/workspaces/${STS_WORKSPACE_ID}/sts"
+  body="$(curl -sS -m 8 -X POST \
+    -H "x-auth-token: ${STS_TOKEN}" \
+    -H "Content-Type: application/json" \
+    -d '{}' "${sts_url}" 2>/dev/null || true)"
+
+  if [[ -z "${body}" ]]; then
+    fail "STS quick-check failed: empty response (${sts_url})"
+    return
+  fi
+
+  local parsed
+  parsed="$(
+    python3 - "${body}" <<'PY'
+import json
+import sys
+raw = sys.argv[1]
+try:
+    obj = json.loads(raw)
+except Exception:
+    print("parse_error")
+    raise SystemExit(0)
+code = obj.get("code")
+message = obj.get("message", "")
+endpoint = ""
+data = obj.get("data")
+if isinstance(data, dict):
+    endpoint = data.get("endpoint", "")
+print(f"{code}\t{message}\t{endpoint}")
+PY
+  )"
+
+  if [[ "${parsed}" == "parse_error" ]]; then
+    fail "STS quick-check failed: non-JSON response (${sts_url}) body=${body}"
+    return
+  fi
+
+  local code message endpoint
+  code="$(printf "%s" "${parsed}" | cut -f1)"
+  message="$(printf "%s" "${parsed}" | cut -f2)"
+  endpoint="$(printf "%s" "${parsed}" | cut -f3)"
+
+  if [[ "${code}" != "0" ]]; then
+    fail "STS quick-check failed: code=${code} message=${message} url=${sts_url}"
+    return
+  fi
+  if [[ -z "${endpoint}" ]]; then
+    fail "STS quick-check failed: endpoint missing in response (${sts_url})"
+    return
+  fi
+  ok "STS quick-check endpoint=${endpoint}"
 }
 
 check_web_endpoint() {
@@ -212,6 +342,9 @@ require_cmd python3
 require_cmd curl
 require_cmd docker
 
+info "Loaded endpoint configuration"
+print_endpoint_config
+
 info "Checking Python runtime"
 check_python_version
 check_python_modules
@@ -224,6 +357,7 @@ info "Checking service responses"
 check_minio_health
 check_media_health
 check_web_endpoint
+check_sts_quickcheck
 
 info "Checking systemd deployment status"
 check_systemd_units

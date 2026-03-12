@@ -100,6 +100,9 @@ start_media_server() {
       --storage-region "${STORAGE_REGION:-us-east-1}" \
       --storage-access-key "${STORAGE_ACCESS_KEY:-minioadmin}" \
       --storage-secret-key "${STORAGE_SECRET_KEY:-minioadmin}" \
+      --storage-public-endpoint "${STORAGE_PUBLIC_ENDPOINT:-}" \
+      --storage-public-port "${STORAGE_PUBLIC_PORT:-9000}" \
+      --trust-forwarded-headers "${TRUST_FORWARDED_HEADERS:-false}" \
       --storage-sts-role-arn "${STORAGE_STS_ROLE_ARN:-arn:aws:iam::minio:role/dji-pilot}" \
       --storage-sts-policy "${STORAGE_STS_POLICY:-}" \
       --storage-sts-duration "${STORAGE_STS_DURATION:-3600}" \
