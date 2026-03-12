@@ -7,7 +7,8 @@ set -euo pipefail
 # - Excludes local git metadata
 # - Preserves remote runtime dependencies (.venv / node_modules / pnpm store)
 
-REMOTE_USER_HOST="${REMOTE_USER_HOST:-nvidia@192.168.10.228}"
+# REMOTE_USER_HOST="${REMOTE_USER_HOST:-nvidia@192.168.10.228}"
+REMOTE_USER_HOST="${REMOTE_USER_HOST:-nvidia@192.168.11.100}"
 SSH_KEY="${SSH_KEY:-${HOME}/.ssh/saved_key/fpg}"
 REMOTE_DIR="${REMOTE_DIR:-~/mediaserver-cloudapi}"
 
