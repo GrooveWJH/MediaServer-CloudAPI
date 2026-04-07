@@ -1,8 +1,15 @@
 import os
+import re
 import sqlite3
 import time
 from contextlib import contextmanager
+from datetime import datetime
 from queue import Queue
+
+
+DJI_CAPTURE_TIME_RE = re.compile(
+    r"^DJI_(\d{14})_[0-9]{4}_[A-Za-z0-9]+\.[A-Za-z0-9]+$"
+)
 
 
 class MediaDB:
@@ -79,7 +86,30 @@ class MediaDB:
         cur = conn.execute(query, params)
         return cur.fetchone()
 
+    def _extract_capture_timestamp(self, file_name=None, object_key=None):
+        candidates = [file_name, object_key]
+        for candidate in candidates:
+            if not candidate:
+                continue
+            base_name = os.path.basename(str(candidate).strip())
+            match = DJI_CAPTURE_TIME_RE.match(base_name)
+            if not match:
+                continue
+            try:
+                dt = datetime.strptime(match.group(1), "%Y%m%d%H%M%S")
+            except ValueError:
+                continue
+            return int(time.mktime(dt.timetuple()))
+        return None
+
+    def _resolve_created_at(self, file_name=None, object_key=None):
+        parsed = self._extract_capture_timestamp(file_name=file_name, object_key=object_key)
+        if parsed is not None:
+            return parsed, True
+        return int(time.time()), False
+
     def upsert_file(self, workspace_id, fingerprint, tiny_fingerprint, object_key, file_name, file_path, conn=None):
+        created_at, parsed_from_name = self._resolve_created_at(file_name=file_name, object_key=object_key)
         self._execute(
             """
             INSERT INTO media_files
@@ -89,7 +119,11 @@ class MediaDB:
                 tiny_fingerprint=excluded.tiny_fingerprint,
                 object_key=excluded.object_key,
                 file_name=excluded.file_name,
-                file_path=excluded.file_path
+                file_path=excluded.file_path,
+                created_at=CASE
+                    WHEN ? THEN ?
+                    ELSE media_files.created_at
+                END
             """,
             (
                 workspace_id,
@@ -98,7 +132,9 @@ class MediaDB:
                 object_key,
                 file_name,
                 file_path,
-                int(time.time()),
+                created_at,
+                int(parsed_from_name),
+                created_at,
             ),
             conn=conn,
         )
@@ -136,6 +172,7 @@ class MediaDB:
         )
 
     def upsert_fingerprint_tiny(self, workspace_id, fingerprint, tiny_fingerprint, file_name=None, file_path=None, conn=None):
+        created_at, parsed_from_name = self._resolve_created_at(file_name=file_name)
         self._execute(
             """
             INSERT INTO media_files
@@ -148,7 +185,11 @@ class MediaDB:
                     ELSE excluded.object_key
                 END,
                 file_name=excluded.file_name,
-                file_path=excluded.file_path
+                file_path=excluded.file_path,
+                created_at=CASE
+                    WHEN ? THEN ?
+                    ELSE media_files.created_at
+                END
             """,
             (
                 workspace_id,
@@ -157,7 +198,9 @@ class MediaDB:
                 "",
                 file_name,
                 file_path,
-                int(time.time()),
+                created_at,
+                int(parsed_from_name),
+                created_at,
             ),
             conn=conn,
         )

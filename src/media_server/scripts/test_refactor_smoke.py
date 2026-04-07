@@ -2,6 +2,7 @@
 import os
 import sys
 import tempfile
+import time
 
 repo_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 src_root = os.path.join(repo_root, "src")
@@ -51,12 +52,26 @@ def main():
     with tempfile.TemporaryDirectory() as tmpdir:
         db_path = os.path.join(tmpdir, "media.db")
         db = MediaDB(db_path, pool_size=1)
-        db.upsert_fingerprint_tiny("ws1", "fp1", "tf1", file_name="a.jpg", file_path="/a")
+        dji_name = "DJI_20260312203353_0001_V.JPG"
+        expected_created_at = int(time.mktime(time.strptime("20260312203353", "%Y%m%d%H%M%S")))
+
+        db.upsert_fingerprint_tiny("ws1", "fp1", "tf1", file_name=dji_name, file_path="/a")
         tiny = db.get_tiny_by_fingerprint("ws1", "fp1")
         assert_true(tiny == "tf1", "tiny lookup failed")
-        db.upsert_file("ws1", "fp1", "tf1", "obj1", "a.jpg", "/a")
+        row = db._fetch_one(
+            "SELECT created_at FROM media_files WHERE workspace_id=? AND fingerprint=?",
+            ("ws1", "fp1"),
+        )
+        assert_true(row and row[0] == expected_created_at, "created_at parse from file name failed")
+
+        db.upsert_file("ws1", "fp1", "tf1", "obj1", dji_name, "/a")
         obj = db.get_object_key_by_fingerprint("ws1", "fp1")
         assert_true(obj == "obj1", "object key lookup failed")
+        row = db._fetch_one(
+            "SELECT created_at FROM media_files WHERE workspace_id=? AND fingerprint=?",
+            ("ws1", "fp1"),
+        )
+        assert_true(row and row[0] == expected_created_at, "created_at should keep parsed capture time")
         db.delete_by_fingerprint("ws1", "fp1")
         obj = db.get_object_key_by_fingerprint("ws1", "fp1")
         assert_true(obj is None, "delete by fingerprint failed")
