@@ -161,7 +161,7 @@ def main(
     host: str = typer.Option("0.0.0.0", "--host", help="Bind host"),
     port: int = typer.Option(8088, "--port", help="Bind port"),
     db_path: str = typer.Option(
-        "data/media.db", "--db-path", help="SQLite DB path"),
+        "/opt/mediaserver/data/media.db", "--db-path", help="SQLite DB path"),
     storage_endpoint: str = typer.Option(
         "http://127.0.0.1:9000", "--storage-endpoint", help="Object storage endpoint"),
     storage_bucket: str = typer.Option(

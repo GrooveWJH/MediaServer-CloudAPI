@@ -103,7 +103,7 @@ python3 src/media_server/server.py \
   --storage-public-port 9000 \
   --trust-forwarded-headers false \
   --storage-sts-role-arn arn:aws:iam::minio:role/dji-pilot \
-  --db-path data/media.db \
+  --db-path /opt/mediaserver/data/media.db \
   --log-level info
 ```
 
@@ -138,17 +138,17 @@ python3 src/media_server/server.py \
 
 提供一个基础 Web 页面，实时读取 SQLite 并通过 MinIO 预览图片，支持删除（同时删除 DB 与对象存储）。
 
-依赖安装（仅该页面需要）：
+依赖安装（推荐与部署保持一致）：
 
 ```bash
-python3 -m pip install flask
+uv sync
 ```
 
 启动（在 MinIO + `server.py` 启动后执行）：
 
 ```bash
-python3 web/app.py \
-  --db-path data/media.db \
+.venv/bin/python web/app.py \
+  --db-path /opt/mediaserver/data/media.db \
   --storage-endpoint http://127.0.0.1:9000 \
   --storage-bucket media \
   --storage-region us-east-1 \
@@ -159,7 +159,7 @@ python3 web/app.py \
 精简指令：
 
 ```bash
-python3 web/app.py \
+.venv/bin/python web/app.py \
   --storage-endpoint http://127.0.0.1:9000
 ```
 
@@ -173,6 +173,8 @@ python3 web/app.py \
 2) `server.py` 使用 systemd 开机自启
 3) Web 浏览器使用 systemd 开机自启（可选）
 
+推荐直接运行 `deploy/setup.sh`。脚本会检测 `python3`、自动安装或复用 `uv`、执行 `uv sync --frozen`，并让 systemd service 固定使用项目的 `.venv/bin/python`。
+
 如果不使用 `deploy/setup.sh`，可手动执行如下步骤：
 
 ### 1) MinIO（Docker Compose）
@@ -185,7 +187,24 @@ cd /opt/mediaserver/MediaServer-CloudAPI/deploy
 docker compose up -d
 ```
 
-### 2) 配置环境变量
+### 2) Python 运行环境
+
+```bash
+cd /opt/mediaserver/MediaServer-CloudAPI
+
+# 首次部署如未安装 uv
+curl -LsSf https://astral.sh/uv/install.sh | sh
+
+~/.local/bin/uv sync --frozen
+```
+
+完成后确认：
+
+```bash
+/opt/mediaserver/MediaServer-CloudAPI/.venv/bin/python -c "import flask, typer"
+```
+
+### 3) 配置环境变量
 
 ```bash
 sudo nano /opt/mediaserver/MediaServer-CloudAPI/deploy/media-server.env
@@ -197,10 +216,10 @@ sudo nano /opt/mediaserver/MediaServer-CloudAPI/deploy/media-server.env
 - `STORAGE_PUBLIC_ENDPOINT` 可选，固定 RC 上传地址；为空则自动按请求头推导
 - `STORAGE_PUBLIC_PORT` 默认 `9000`
 - `TRUST_FORWARDED_HEADERS` 默认 `false`（仅反向代理时设为 `true`）
-- `DB_PATH` 建议放到持久化目录（如 `/opt/mediaserver/data/media.db`）
+- `DB_PATH` 默认使用 `/opt/mediaserver/data/media.db`
 - `MEDIA_SERVER_TOKEN` 与 Pilot2 配置一致
 
-### 3) systemd 服务
+### 4) systemd 服务
 
 ```bash
 sudo cp /opt/mediaserver/MediaServer-CloudAPI/deploy/media-server.service /etc/systemd/system/
@@ -408,7 +427,7 @@ docker run --rm -v /tmp/mc:/root/.mc minio/mc \
 - 换网后上传失败：先确认 RC 访问的是新 `http://<新IP>:8090`，再检查 STS 返回 endpoint 是否跟随变更
 - 反向代理场景：设置 `TRUST_FORWARDED_HEADERS=true` 并确保代理透传 `X-Forwarded-Host/Proto`
 - 需要固定地址回退：设置 `STORAGE_PUBLIC_ENDPOINT=http://x.x.x.x:9000` 并重启 `media-server.service`
-- 指纹持久化位置：默认 `data/media.db`（`media_files` 同时存 fingerprint 与 tiny_fingerprint）
+- 指纹持久化位置：默认 `/opt/mediaserver/data/media.db`（`media_files` 同时存 fingerprint 与 tiny_fingerprint）
 
 ## 目录结构
 

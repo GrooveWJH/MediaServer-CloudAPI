@@ -18,10 +18,41 @@ fail() { FAIL_COUNT=$((FAIL_COUNT + 1)); say "${RED}FAIL${RESET} $1"; }
 info() { say "${BLUE}INFO${RESET} $1"; }
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-ENV_FILE="${ROOT_DIR}/deploy/media-server.env"
+DEPLOY_ROOT="${ROOT_DIR}"
+ENV_FILE=""
+VENV_PYTHON=""
+PYTHON_JSON_BIN="python3"
 STS_WORKSPACE_ID=""
 STS_TOKEN=""
 MEDIA_HOST_OVERRIDE=""
+
+resolve_deploy_root() {
+  if ! command -v systemctl >/dev/null 2>&1; then
+    return
+  fi
+
+  local unit working_dir
+  for unit in media-server.service media-web.service; do
+    if ! systemctl list-unit-files "${unit}" --no-legend 2>/dev/null | grep -q "^${unit}"; then
+      continue
+    fi
+
+    working_dir="$(systemctl show -p WorkingDirectory --value "${unit}" 2>/dev/null || true)"
+    if [[ -n "${working_dir}" && -d "${working_dir}" ]]; then
+      DEPLOY_ROOT="${working_dir}"
+      return
+    fi
+  done
+}
+
+refresh_python_paths() {
+  ENV_FILE="${DEPLOY_ROOT}/deploy/media-server.env"
+  VENV_PYTHON="${DEPLOY_ROOT}/.venv/bin/python"
+  PYTHON_JSON_BIN="python3"
+  if [[ -x "${VENV_PYTHON}" ]]; then
+    PYTHON_JSON_BIN="${VENV_PYTHON}"
+  fi
+}
 
 usage() {
   cat <<'USAGE'
@@ -61,6 +92,9 @@ while [[ $# -gt 0 ]]; do
       ;;
   esac
 done
+
+resolve_deploy_root
+refresh_python_paths
 
 if [[ -f "${ENV_FILE}" ]]; then
   info "Loading env: ${ENV_FILE}"
@@ -145,24 +179,23 @@ check_python_version() {
 }
 
 check_python_modules() {
-  if ! command -v python3 >/dev/null 2>&1; then
-    fail "python3 not found, cannot verify Python packages"
+  if [[ ! -x "${VENV_PYTHON}" ]]; then
+    fail "Project virtualenv python not found: ${VENV_PYTHON}"
     return
   fi
 
-  local missing
-  missing="$(
-    python3 - <<'PY'
-import importlib.util
-mods = ["typer", "flask"]
-missing = [m for m in mods if importlib.util.find_spec(m) is None]
-print(",".join(missing))
-PY
-  )"
-  if [[ -z "${missing}" ]]; then
-    ok "Python packages available: typer, flask"
+  if "${VENV_PYTHON}" -c 'import flask, typer' >/dev/null 2>&1; then
+    ok "Project virtualenv packages available: typer, flask"
   else
-    fail "Missing Python packages: ${missing}"
+    fail "Project virtualenv missing required packages: typer, flask"
+  fi
+}
+
+check_uv_command() {
+  if command -v uv >/dev/null 2>&1; then
+    ok "uv command exists"
+  else
+    warn "uv command not found (deploy/setup.sh installs it when needed)"
   fi
 }
 
@@ -218,7 +251,7 @@ check_media_health() {
     return
   fi
 
-  if python3 - "$body" <<'PY'
+  if "${PYTHON_JSON_BIN}" - "$body" <<'PY'
 import json
 import sys
 raw = sys.argv[1]
@@ -264,7 +297,7 @@ check_sts_quickcheck() {
 
   local parsed
   parsed="$(
-    python3 - "${body}" <<'PY'
+    "${PYTHON_JSON_BIN}" - "${body}" <<'PY'
 import json
 import sys
 raw = sys.argv[1]
@@ -337,6 +370,32 @@ check_systemd_units() {
   done
 }
 
+check_systemd_execstart() {
+  if ! command -v systemctl >/dev/null 2>&1; then
+    return
+  fi
+
+  local expected unit unit_text
+  expected="${DEPLOY_ROOT}/.venv/bin/python"
+  for unit in media-server.service media-web.service; do
+    if ! systemctl list-unit-files "${unit}" --no-legend 2>/dev/null | grep -q "^${unit}"; then
+      continue
+    fi
+
+    unit_text="$(systemctl cat "${unit}" 2>/dev/null || true)"
+    if [[ -z "${unit_text}" ]]; then
+      warn "Unable to inspect systemd unit definition: ${unit}"
+      continue
+    fi
+
+    if printf "%s\n" "${unit_text}" | grep -Fq "ExecStart=${expected}"; then
+      ok "systemd ExecStart uses project virtualenv: ${unit}"
+    else
+      fail "systemd ExecStart does not use project virtualenv: ${unit}"
+    fi
+  done
+}
+
 info "Checking required commands"
 require_cmd python3
 require_cmd curl
@@ -347,6 +406,7 @@ print_endpoint_config
 
 info "Checking Python runtime"
 check_python_version
+check_uv_command
 check_python_modules
 
 info "Checking Docker runtime"
@@ -361,6 +421,7 @@ check_sts_quickcheck
 
 info "Checking systemd deployment status"
 check_systemd_units
+check_systemd_execstart
 
 say ""
 info "Summary: pass=${PASS_COUNT}, warn=${WARN_COUNT}, fail=${FAIL_COUNT}"

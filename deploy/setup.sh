@@ -29,6 +29,17 @@ get_user() {
   fi
 }
 
+get_user_home() {
+  local user_name="$1"
+  local home_dir
+  home_dir="$(getent passwd "${user_name}" 2>/dev/null | cut -d: -f6)"
+  if [[ -n "${home_dir}" ]]; then
+    echo "${home_dir}"
+  else
+    echo "/home/${user_name}"
+  fi
+}
+
 confirm() {
   local prompt="$1"
   read -r -p "${prompt} [y/N] " ans
@@ -41,6 +52,64 @@ ensure_docker_enabled() {
       sudo systemctl enable --now docker >/dev/null 2>&1 || true
     fi
   fi
+}
+
+require_cmd_or_exit() {
+  local cmd="$1"
+  if ! command -v "${cmd}" >/dev/null 2>&1; then
+    err "required command not found: ${cmd}"
+    exit 1
+  fi
+}
+
+ensure_uv_installed() {
+  local user_name="$1"
+  local user_home="$2"
+  local user_path="${user_home}/.local/bin:${PATH}"
+
+  if sudo -u "${user_name}" -H env PATH="${user_path}" bash -lc 'command -v uv >/dev/null 2>&1'; then
+    ok "uv already installed for ${user_name}"
+    return
+  fi
+
+  info "Installing uv for ${user_name}"
+  sudo -u "${user_name}" -H bash -lc 'curl -LsSf https://astral.sh/uv/install.sh | sh'
+  if ! sudo -u "${user_name}" -H env PATH="${user_path}" bash -lc 'command -v uv >/dev/null 2>&1'; then
+    err "uv install failed for ${user_name}"
+    exit 1
+  fi
+  ok "Installed uv for ${user_name}"
+}
+
+prepare_python_runtime() {
+  local target_root="$1"
+  local user_name="$2"
+  local user_home="$3"
+  local user_path="${user_home}/.local/bin:${PATH}"
+  local venv_python="${target_root}/.venv/bin/python"
+
+  if ! command -v python3 >/dev/null 2>&1; then
+    err "required command not found: python3"
+    exit 1
+  fi
+  require_cmd_or_exit curl
+  ensure_uv_installed "${user_name}" "${user_home}"
+
+  info "Syncing Python dependencies with uv"
+  sudo -u "${user_name}" -H env PATH="${user_path}" UV_PROJECT_ENVIRONMENT="${target_root}/.venv" \
+    bash -lc "cd '${target_root}' && uv sync --frozen"
+
+  if [[ ! -x "${venv_python}" ]]; then
+    err "virtual environment python not found: ${venv_python}"
+    exit 1
+  fi
+
+  if ! sudo -u "${user_name}" -H "${venv_python}" -c 'import flask, typer'; then
+    err "project virtual environment missing flask/typer after uv sync"
+    exit 1
+  fi
+
+  ok "Project virtual environment ready at ${venv_python}"
 }
 
 wait_for_minio() {
@@ -93,15 +162,23 @@ print_summary() {
   done
 }
 
+remove_systemd_units() {
+  info "Stopping services"
+  if command -v systemctl >/dev/null 2>&1; then
+    sudo systemctl disable --now media-web.service media-server.service >/dev/null 2>&1 || true
+  fi
+  sudo rm -f /etc/systemd/system/media-web.service /etc/systemd/system/media-server.service
+  if command -v systemctl >/dev/null 2>&1; then
+    sudo systemctl daemon-reload
+  fi
+}
+
 cleanup_all() {
   local target_root="/opt/mediaserver/MediaServer-CloudAPI"
   local data_root="/opt/mediaserver/data"
   local actions=()
 
-  info "Stopping services"
-  sudo systemctl disable --now media-web.service media-server.service >/dev/null 2>&1 || true
-  sudo rm -f /etc/systemd/system/media-web.service /etc/systemd/system/media-server.service
-  sudo systemctl daemon-reload
+  remove_systemd_units
   actions+=("disabled systemd services")
 
   if [[ -d "${target_root}/deploy" ]]; then
@@ -141,6 +218,8 @@ install_or_update() {
   local data_root="/opt/mediaserver/data"
   local user_name
   user_name="$(get_user)"
+  local user_home
+  user_home="$(get_user_home "${user_name}")"
   local storage_bucket="media"
   local storage_region="us-east-1"
   local storage_access_key="minioadmin"
@@ -161,10 +240,20 @@ install_or_update() {
   sudo chown -R "${user_name}:${user_name}" /opt/mediaserver
   actions+=("created /opt/mediaserver and ${data_root}")
 
+  remove_systemd_units
+  actions+=("reinstalled systemd units")
+
   info "Syncing repository to ${target_root}"
-  sudo rsync -a --delete "${repo_root}/" "${target_root}/"
+  sudo rsync -a --delete \
+    --exclude '.venv/' \
+    --exclude '__pycache__/' \
+    --exclude '*.pyc' \
+    "${repo_root}/" "${target_root}/"
   sudo chown -R "${user_name}:${user_name}" "${target_root}"
   actions+=("synced repository to ${target_root}")
+
+  prepare_python_runtime "${target_root}" "${user_name}" "${user_home}"
+  actions+=("synced Python dependencies with uv")
 
   info "Writing environment file"
   sudo tee "${target_root}/deploy/media-server.env" >/dev/null <<EOF
@@ -204,13 +293,13 @@ EOF
   info "Installing systemd units"
   sed -e "s|^WorkingDirectory=.*|WorkingDirectory=${target_root}|" \
       -e "s|^EnvironmentFile=.*|EnvironmentFile=${target_root}/deploy/media-server.env|" \
-      -e "s|^ExecStart=.*|ExecStart=/usr/bin/python3 ${target_root}/src/media_server/server.py \\\\|" \
+      -e "s|^ExecStart=.*|ExecStart=${target_root}/.venv/bin/python ${target_root}/src/media_server/server.py \\\\|" \
       -e "s|^User=.*|User=${user_name}|" \
       -e "s|^Group=.*|Group=${user_name}|" \
       "${target_root}/deploy/media-server.service" > /tmp/media-server.service
   sed -e "s|^WorkingDirectory=.*|WorkingDirectory=${target_root}|" \
       -e "s|^EnvironmentFile=.*|EnvironmentFile=${target_root}/deploy/media-server.env|" \
-      -e "s|^ExecStart=.*|ExecStart=/usr/bin/python3 ${target_root}/web/app.py \\\\|" \
+      -e "s|^ExecStart=.*|ExecStart=${target_root}/.venv/bin/python ${target_root}/web/app.py \\\\|" \
       -e "s|^User=.*|User=${user_name}|" \
       -e "s|^Group=.*|Group=${user_name}|" \
       "${target_root}/deploy/media-web.service" > /tmp/media-web.service

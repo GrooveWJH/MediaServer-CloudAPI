@@ -56,7 +56,7 @@ def parse_args():
     parser.add_argument("--storage-sts-role-arn", default="arn:aws:iam::minio:role/dji-pilot", help="MinIO STS role ARN")
     parser.add_argument("--storage-sts-policy", default="", help="MinIO STS policy JSON")
     parser.add_argument("--storage-sts-duration", type=int, default=3600, help="MinIO STS duration seconds")
-    parser.add_argument("--db-path", default="data/media.db", help="SQLite DB path")
+    parser.add_argument("--db-path", default="/opt/mediaserver/data/media.db", help="SQLite DB path")
     parser.add_argument("--log-level", default="info", help="Log level: debug/info/warning/error/critical")
     args = parser.parse_args()
     return AppConfig(

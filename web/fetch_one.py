@@ -47,7 +47,7 @@ def open_db(db_path):
 def parse_args():
     parser = argparse.ArgumentParser(
         description="Fetch one object from SQLite + MinIO")
-    parser.add_argument("--db-path", default="data/media.db",
+    parser.add_argument("--db-path", default="/opt/mediaserver/data/media.db",
                         help="SQLite DB path")
     parser.add_argument(
         "--storage-endpoint", default="http://127.0.0.1:9000", help="Object storage endpoint")

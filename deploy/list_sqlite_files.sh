@@ -1,15 +1,16 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-DB_PATH=""
+DB_PATH="/opt/mediaserver/data/media.db"
 
 usage() {
   cat <<'USAGE'
 Usage:
-  ./deploy/list_sqlite_files.sh --db /path/to/media.db
+  ./deploy/list_sqlite_files.sh [--db /path/to/media.db]
 
 Description:
   Query SQLite media entries and print file name + time fields.
+  Default DB path: /opt/mediaserver/data/media.db
 USAGE
 }
 
@@ -30,12 +31,6 @@ while [[ $# -gt 0 ]]; do
       ;;
   esac
 done
-
-if [[ -z "${DB_PATH}" ]]; then
-  echo "Error: --db is required" >&2
-  usage
-  exit 1
-fi
 
 if [[ ! -f "${DB_PATH}" ]]; then
   echo "Error: DB file not found: ${DB_PATH}" >&2

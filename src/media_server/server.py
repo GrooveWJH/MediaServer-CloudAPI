@@ -60,7 +60,7 @@ def run(
     ),
     storage_sts_policy: str = typer.Option("", "--storage-sts-policy", help="MinIO STS policy JSON"),
     storage_sts_duration: int = typer.Option(3600, "--storage-sts-duration", help="MinIO STS duration seconds"),
-    db_path: str = typer.Option("data/media.db", "--db-path", help="SQLite DB path"),
+    db_path: str = typer.Option("/opt/mediaserver/data/media.db", "--db-path", help="SQLite DB path"),
     log_level: str = typer.Option("info", "--log-level", help="Log level: debug/info/warning/error/critical"),
 ):
     argv = [

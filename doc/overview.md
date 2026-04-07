@@ -51,7 +51,7 @@
 
 ## SQLite 持久化
 
-默认路径：`data/media.db`（可通过 `--db-path` 指定）
+默认路径：`/opt/mediaserver/data/media.db`（可通过 `--db-path` 指定）
 
 表：`media_files`
 
@@ -97,7 +97,7 @@ media/{workspace_id}/{YYYYMMDD}/{filename}
 
 - 媒体服务日志：查看 `fast-upload / tiny-fingerprints / sts / upload-callback`
 - MinIO trace：`mc admin trace local --all`（可用 `rg` 过滤 `s3.PutObject/HeadObject/DeleteObject`）
-- SQLite：直接查看 `data/media.db`
+- SQLite：直接查看 `/opt/mediaserver/data/media.db`
 
 ## 与 Pilot2 的交互顺序
 
