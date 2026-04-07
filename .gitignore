@@ -17,3 +17,5 @@ build/
 *.egg-info/
 tmp/
 data/
+
+/sync_to_device.sh
