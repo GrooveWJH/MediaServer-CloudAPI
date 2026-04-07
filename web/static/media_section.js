@@ -24,6 +24,10 @@ function buildPreviewUrl(apiBase, objectKey) {
   return `${apiBase}/preview?object_key=${encodeURIComponent(objectKey)}`;
 }
 
+function formatValue(value) {
+  return value === null || value === undefined || value === "" ? "-" : value;
+}
+
 function buildCard(item, apiBase) {
   if (!item.object_key) return null;
   const card = document.createElement("article");
@@ -38,6 +42,13 @@ function buildCard(item, apiBase) {
     <div class="media-meta"><strong>Workspace：</strong>${item.workspace_id}</div>
     <div class="media-meta"><strong>Object Key：</strong>${item.object_key}</div>
     <div class="media-meta"><strong>Fingerprint：</strong>${item.fingerprint || "-"}</div>
+    <div class="media-meta"><strong>原图标记：</strong>${formatValue(item.is_original_label)}</div>
+    <div class="media-meta"><strong>子文件类型：</strong>${formatValue(item.sub_file_type)}</div>
+    <div class="media-meta"><strong>拍摄时间：</strong>${formatValue(item.capture_time)}</div>
+    <div class="media-meta"><strong>绝对高度：</strong>${formatValue(item.absolute_altitude_display)}</div>
+    <div class="media-meta"><strong>相对高度：</strong>${formatValue(item.relative_altitude_display)}</div>
+    <div class="media-meta"><strong>云台偏航：</strong>${formatValue(item.gimbal_yaw_degree_display)}</div>
+    <div class="media-meta"><strong>拍摄位置：</strong>${formatValue(item.shoot_position_display)}</div>
     <div class="media-actions">
       <button type="button" data-delete="1" data-record-id="${item.id}" data-object-key="${item.object_key}">删除</button>
     </div>

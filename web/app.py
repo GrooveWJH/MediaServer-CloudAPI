@@ -16,7 +16,9 @@ sys.path.insert(0, os.path.join(repo_root, "src"))
 
 SELECT_FIELDS = """
     id, workspace_id, fingerprint, tiny_fingerprint, object_key,
-    file_name, file_path, created_at
+    file_name, file_path, is_original, sub_file_type, capture_time,
+    absolute_altitude, relative_altitude, gimbal_yaw_degree,
+    shoot_position_lat, shoot_position_lng, created_at
 """
 
 
@@ -103,10 +105,40 @@ def create_app(config):
     app = Flask(__name__)
     parse_storage_endpoint(config)
 
+    def _format_timestamp(value):
+        if value in {None, ""}:
+            return "-"
+        return datetime.fromtimestamp(int(value)).strftime("%Y-%m-%d %H:%M:%S")
+
+    def _format_original_label(value):
+        if value is None:
+            return "-"
+        return "原图" if bool(value) else "非原图"
+
+    def _format_meter(value):
+        if value is None:
+            return "-"
+        return f"{value} m"
+
+    def _format_position(lat, lng):
+        if lat is None or lng is None:
+            return "-"
+        return f"{lat}, {lng}"
+
     def _row_to_item(row):
-        created = datetime.fromtimestamp(
-            row["created_at"]).strftime("%Y-%m-%d %H:%M:%S")
-        return {**dict(row), "created_at": created}
+        item = dict(row)
+        item["created_at"] = _format_timestamp(row["created_at"])
+        item["capture_time"] = _format_timestamp(row["capture_time"])
+        item["is_original"] = None if row["is_original"] is None else bool(row["is_original"])
+        item["is_original_label"] = _format_original_label(row["is_original"])
+        item["absolute_altitude_display"] = _format_meter(row["absolute_altitude"])
+        item["relative_altitude_display"] = _format_meter(row["relative_altitude"])
+        item["gimbal_yaw_degree_display"] = "-" if row["gimbal_yaw_degree"] is None else f'{row["gimbal_yaw_degree"]}°'
+        item["shoot_position_display"] = _format_position(
+            row["shoot_position_lat"],
+            row["shoot_position_lng"],
+        )
+        return item
 
     @app.route("/")
     def index():

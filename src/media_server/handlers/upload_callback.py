@@ -45,6 +45,9 @@ def handle_upload_callback(handler, workspace_id):
                 req.object_key,
                 req.name,
                 req.path,
+                is_original=req.is_original,
+                sub_file_type=req.sub_file_type,
+                metadata=req.metadata,
                 conn=conn,
             )
 

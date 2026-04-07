@@ -11,6 +11,13 @@
         <div class="media-meta"><strong>Workspace：</strong>{{ item.workspace_id }}</div>
         <div class="media-meta"><strong>Object Key：</strong>{{ item.object_key }}</div>
         <div class="media-meta"><strong>Fingerprint：</strong>{{ item.fingerprint or "-" }}</div>
+        <div class="media-meta"><strong>原图标记：</strong>{{ item.is_original_label }}</div>
+        <div class="media-meta"><strong>子文件类型：</strong>{{ item.sub_file_type or "-" }}</div>
+        <div class="media-meta"><strong>拍摄时间：</strong>{{ item.capture_time }}</div>
+        <div class="media-meta"><strong>绝对高度：</strong>{{ item.absolute_altitude_display }}</div>
+        <div class="media-meta"><strong>相对高度：</strong>{{ item.relative_altitude_display }}</div>
+        <div class="media-meta"><strong>云台偏航：</strong>{{ item.gimbal_yaw_degree_display }}</div>
+        <div class="media-meta"><strong>拍摄位置：</strong>{{ item.shoot_position_display }}</div>
         <div class="media-actions">
           <button type="button" data-delete="1" data-record-id="{{ item.id }}" data-object-key="{{ item.object_key }}">删除</button>
         </div>

@@ -27,6 +27,9 @@ def handle_fast_upload(handler, workspace_id):
             req.tiny_fingerprint,
             file_name=req.name,
             file_path=req.path,
+            is_original=req.is_original,
+            sub_file_type=req.sub_file_type,
+            metadata=req.metadata,
         )
 
     logging.info(
@@ -51,4 +54,4 @@ def handle_fast_upload(handler, workspace_id):
             ok_response(handler, {"object_key": stored_key}, status=HTTPStatus.OK)
             return
         handler.db.delete_by_fingerprint(workspace_id, req.fingerprint)
-    ok_response(handler, {}, message=f"{req.fingerprint} don't exist.", code=1, status=HTTPStatus.OK)
+    ok_response(handler, "", message=f"{req.fingerprint} don't exist.", code=-1, status=HTTPStatus.OK)
