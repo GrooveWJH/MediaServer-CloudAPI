@@ -224,7 +224,7 @@ def handle_sts(handler, workspace_id):
         sorted(payload["data"]["credentials"].keys()),
     )
     logging.debug("sts response payload=%s", json.dumps(payload, ensure_ascii=True))
-    logging.info(
+    logging.debug(
         "sts workspace_id=%s token=%s",
         workspace_id,
         token,

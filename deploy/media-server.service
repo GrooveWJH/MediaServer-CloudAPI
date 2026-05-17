@@ -2,6 +2,8 @@
 Description=MediaServer CloudAPI
 After=network.target docker.service
 Wants=network.target
+StartLimitIntervalSec=300
+StartLimitBurst=3
 
 [Service]
 Type=simple
@@ -29,7 +31,10 @@ ExecStart=/opt/mediaserver/MediaServer-CloudAPI/.venv/bin/python /opt/mediaserve
   --db-path ${DB_PATH} \
   --log-level ${LOG_LEVEL}
 Restart=on-failure
-RestartSec=2
+RestartSec=10
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7
 User=ubuntu
 Group=ubuntu
 

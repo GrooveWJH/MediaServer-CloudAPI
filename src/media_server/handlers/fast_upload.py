@@ -32,7 +32,7 @@ def handle_fast_upload(handler, workspace_id):
             metadata=req.metadata,
         )
 
-    logging.info(
+    logging.debug(
         "fast-upload workspace_id=%s name=%s path=%s fingerprint=%s tiny=%s token=%s",
         workspace_id,
         req.name,

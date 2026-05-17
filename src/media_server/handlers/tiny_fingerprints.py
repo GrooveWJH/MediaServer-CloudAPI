@@ -36,7 +36,7 @@ def handle_tiny_fingerprints(handler, workspace_id):
             continue
         handler.db.delete_by_tiny(workspace_id, fp)
 
-    logging.info(
+    logging.debug(
         "tiny-fingerprints workspace_id=%s requested=%s found=%s token=%s",
         workspace_id,
         len(req.tiny_fingerprints),

@@ -27,7 +27,9 @@ bash deploy/setup.sh
 - 启动 MinIO（Docker Compose）
 - 自动创建 `media` bucket
 - 默认写入 `STORAGE_ENDPOINT=http://127.0.0.1:9000`（服务端内部访问）
-- 启动并启用 `media-server` 与 `media-web` systemd 服务
+- 默认写入 `LOG_LEVEL=warning`，边缘设备优先降低 journald 写盘量
+- 默认启动并启用 `media-server` systemd 服务
+- 默认不启用 Web；只有显式传 `./deploy/setup.sh --enable-web` 才启动 `media-web.service`
 - 输出执行摘要
 
 如果你在开发机/边缘设备上不想安装 systemd 服务，可以使用“本地一键管理脚本”：
@@ -126,7 +128,7 @@ python3 src/media_server/server.py \
 - `storage-sts-policy` 可选，JSON 字符串（用于限制临时凭证权限）
 - `storage-sts-duration` 临时凭证有效期（秒）
 - `db-path` SQLite 数据库文件路径（用于持久化 fingerprint / tiny_fingerprint）
-- `log-level` 日志级别（debug/info/warning/error/critical），默认 `info`
+- `log-level` 日志级别（debug/info/warning/error/critical），默认 `warning`
 
 ### 4) RC WebView 配置
 
@@ -171,9 +173,10 @@ uv sync
 
 1) MinIO 使用 Docker Compose 常驻
 2) `server.py` 使用 systemd 开机自启
-3) Web 浏览器使用 systemd 开机自启（可选）
+3) Web 浏览器使用 systemd 按需启用（默认关闭）
 
 推荐直接运行 `deploy/setup.sh`。脚本会检测 `python3`、自动安装或复用 `uv`、执行 `uv sync --frozen`，并让 systemd service 固定使用项目的 `.venv/bin/python`。
+默认不启用 Web，如果需要 8088 页面，再执行 `./deploy/setup.sh --enable-web`。
 
 如果不使用 `deploy/setup.sh`，可手动执行如下步骤：
 
@@ -218,6 +221,8 @@ sudo nano /opt/mediaserver/MediaServer-CloudAPI/deploy/media-server.env
 - `TRUST_FORWARDED_HEADERS` 默认 `false`（仅反向代理时设为 `true`）
 - `DB_PATH` 默认使用 `/opt/mediaserver/data/media.db`
 - `MEDIA_SERVER_TOKEN` 与 Pilot2 配置一致
+- `LOG_LEVEL=warning` 作为边缘设备默认值；仅在排障时临时调成 `info` 或 `debug`
+- `WEB_ENABLED=false` 为默认值；仅在确实需要 Web UI 时改成 `true` 或通过 `./deploy/setup.sh --enable-web` 部署
 
 ### 4) systemd 服务
 
@@ -229,7 +234,7 @@ sudo systemctl daemon-reload
 sudo systemctl enable media-server.service
 sudo systemctl start media-server.service
 
-# 可选：Web 浏览器
+# 可选：Web 浏览器（默认不启用）
 sudo systemctl enable media-web.service
 sudo systemctl start media-web.service
 ```
@@ -443,6 +448,14 @@ docker run --rm -v /tmp/mc:/root/.mc minio/mc \
 - `src/media_server/scripts/image_gen.py` 生成随机 PNG 测试图
 - `doc/flow.md` 执行流程与架构图
 - `doc/overview.md` 面向 AI/开发者的快速说明
+
+## 默认验收
+
+- 必需：`media-server.service` 为 `active`
+- 必需：`http://127.0.0.1:8090/health` 返回正常 JSON
+- 必需：MinIO `9000/9001` 可用且 bucket/STS 正常
+- 必需：`/opt/mediaserver/data/media.db` 路径正确且可读写
+- 可选：`media-web.service` 与 `8088` 仅在执行 `./deploy/setup.sh --enable-web` 后要求可用
 
 ## object_key 规则
 

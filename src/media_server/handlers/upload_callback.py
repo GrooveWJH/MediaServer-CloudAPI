@@ -51,7 +51,7 @@ def handle_upload_callback(handler, workspace_id):
                 conn=conn,
             )
 
-    logging.info(
+    logging.debug(
         "upload-callback workspace_id=%s name=%s object_key=%s token=%s",
         workspace_id,
         req.name,

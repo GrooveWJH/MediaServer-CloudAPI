@@ -79,6 +79,20 @@ class RequestModelMetadataTest(unittest.TestCase):
 
 
 class MediaDBMetadataTest(unittest.TestCase):
+    def test_connections_use_edge_friendly_sqlite_pragmas(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "media.db"
+            db = MediaDB(str(db_path))
+
+            with db._get_conn() as conn:
+                journal_mode = conn.execute("PRAGMA journal_mode").fetchone()[0]
+                synchronous = conn.execute("PRAGMA synchronous").fetchone()[0]
+
+            db.close()
+
+            self.assertEqual("wal", str(journal_mode).lower())
+            self.assertEqual(1, synchronous)
+
     def test_init_schema_migrates_existing_media_table(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = Path(tmpdir) / "media.db"

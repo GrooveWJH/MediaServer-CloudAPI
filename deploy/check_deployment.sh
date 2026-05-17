@@ -108,7 +108,11 @@ fi
 
 MEDIA_SERVER_PORT="${MEDIA_SERVER_PORT:-8090}"
 WEB_PORT="${WEB_PORT:-8088}"
+WEB_ENABLED="${WEB_ENABLED:-false}"
 STORAGE_ENDPOINT="${STORAGE_ENDPOINT:-http://127.0.0.1:9000}"
+STORAGE_BUCKET="${STORAGE_BUCKET:-media}"
+STORAGE_ACCESS_KEY="${STORAGE_ACCESS_KEY:-minioadmin}"
+STORAGE_SECRET_KEY="${STORAGE_SECRET_KEY:-minioadmin}"
 STORAGE_PUBLIC_ENDPOINT="${STORAGE_PUBLIC_ENDPOINT:-}"
 STORAGE_PUBLIC_PORT="${STORAGE_PUBLIC_PORT:-9000}"
 TRUST_FORWARDED_HEADERS="${TRUST_FORWARDED_HEADERS:-false}"
@@ -153,15 +157,22 @@ http_code() {
 }
 
 check_python_version() {
-  if ! command -v python3 >/dev/null 2>&1; then
+  local python_bin runtime_label
+  if [[ -x "${VENV_PYTHON}" ]]; then
+    python_bin="${VENV_PYTHON}"
+    runtime_label="project virtualenv"
+  elif command -v python3 >/dev/null 2>&1; then
+    python_bin="python3"
+    runtime_label="bootstrap fallback"
+  else
     fail "python3 not found, cannot verify version"
     return
   fi
 
   local version
-  version="$(python3 -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}")' 2>/dev/null || true)"
+  version="$("${python_bin}" -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}")' 2>/dev/null || true)"
   if [[ -z "${version}" ]]; then
-    fail "Unable to read python3 version"
+    fail "Unable to read ${runtime_label} Python version"
     return
   fi
 
@@ -170,11 +181,11 @@ check_python_version() {
   ver_minor="$(printf "%s" "${version}" | cut -d. -f2)"
 
   if (( ver_major > 3 || (ver_major == 3 && ver_minor >= 12) )); then
-    ok "Python version is ${version} (>= 3.12)"
+    ok "Python version is ${version} via ${runtime_label} (>= 3.12)"
   elif (( ver_major == 3 && ver_minor >= 8 )); then
-    warn "Python version is ${version} (README says >=3.8, pyproject requires >=3.12)"
+    warn "Python version is ${version} via ${runtime_label}; pyproject requires >= 3.12"
   else
-    fail "Python version is ${version}, too old"
+    fail "Python version is ${version} via ${runtime_label}, too old"
   fi
 }
 
@@ -191,9 +202,34 @@ check_python_modules() {
   fi
 }
 
+check_log_level_default() {
+  local level="${LOG_LEVEL:-}"
+  if [[ -z "${level}" ]]; then
+    warn "LOG_LEVEL is unset in ${ENV_FILE}"
+    return
+  fi
+
+  case "${level}" in
+    warning|error|critical)
+      ok "LOG_LEVEL is edge-friendly by default: ${level}"
+      ;;
+    info)
+      warn "LOG_LEVEL is ${level}; warning is recommended for edge deployment"
+      ;;
+    debug)
+      fail "LOG_LEVEL is debug; this is too noisy for default edge deployment"
+      ;;
+    *)
+      warn "LOG_LEVEL uses custom value: ${level}"
+      ;;
+  esac
+}
+
 check_uv_command() {
   if command -v uv >/dev/null 2>&1; then
     ok "uv command exists"
+  elif [[ -x "${VENV_PYTHON}" ]]; then
+    info "uv command not visible in current shell; project virtualenv already exists"
   else
     warn "uv command not found (deploy/setup.sh installs it when needed)"
   fi
@@ -241,6 +277,50 @@ check_minio_health() {
   fi
 }
 
+mc_container_prefix() {
+  local endpoint="$1"
+  local mc_config_dir="$2"
+  local -a args=(sudo docker run --rm -v "${mc_config_dir}:/root/.mc")
+  case "${endpoint}" in
+    http://127.0.0.1:*|https://127.0.0.1:*|http://localhost:*|https://localhost:*)
+      args+=(--network host)
+      ;;
+  esac
+  printf '%s\n' "${args[@]}"
+}
+
+check_minio_data_access() {
+  if ! command -v docker >/dev/null 2>&1; then
+    fail "docker not found, cannot verify MinIO IAM/bucket access"
+    return
+  fi
+
+  local mc_config_dir="${DEPLOY_ROOT}/deploy/.mc"
+  local -a mc_cmd=()
+  sudo mkdir -p "${mc_config_dir}" >/dev/null 2>&1 || true
+  mapfile -t mc_cmd < <(mc_container_prefix "${STORAGE_ENDPOINT}" "${mc_config_dir}")
+
+  if ! "${mc_cmd[@]}" minio/mc \
+    alias set local "${STORAGE_ENDPOINT}" "${STORAGE_ACCESS_KEY}" "${STORAGE_SECRET_KEY}" >/dev/null 2>&1; then
+    fail "Unable to configure MinIO client alias for access checks"
+    return
+  fi
+
+  if "${mc_cmd[@]}" minio/mc \
+    admin info local >/dev/null 2>&1; then
+    ok "MinIO IAM/API access OK"
+  else
+    fail "MinIO IAM/API access failed"
+  fi
+
+  if "${mc_cmd[@]}" minio/mc \
+    ls "local/${STORAGE_BUCKET}" >/dev/null 2>&1; then
+    ok "MinIO bucket access OK: ${STORAGE_BUCKET}"
+  else
+    fail "MinIO bucket access failed: ${STORAGE_BUCKET}"
+  fi
+}
+
 check_media_health() {
   local body code
   body="$(curl -sS -m 5 "${MEDIA_HEALTH_URL}" 2>/dev/null || true)"
@@ -275,7 +355,7 @@ PY
 
 check_sts_quickcheck() {
   if [[ -z "${STS_WORKSPACE_ID}" ]]; then
-    info "Skip STS quick-check (no --sts-workspace-id provided)"
+    info "Skip STS quick-check (no --sts-workspace-id provided); bucket/IAM checks still applied"
     return
   fi
   if [[ -z "${STS_TOKEN}" ]]; then
@@ -327,7 +407,7 @@ PY
   endpoint="$(printf "%s" "${parsed}" | cut -f3)"
 
   if [[ "${code}" != "0" ]]; then
-    fail "STS quick-check failed: code=${code} message=${message} url=${sts_url}"
+    fail "STS quick-check failed (likely MinIO/IAM/STS issue): code=${code} message=${message} url=${sts_url}"
     return
   fi
   if [[ -z "${endpoint}" ]]; then
@@ -337,15 +417,46 @@ PY
   ok "STS quick-check endpoint=${endpoint}"
 }
 
+listener_pid_for_port() {
+  local port="$1"
+  if command -v ss >/dev/null 2>&1; then
+    ss -lntp "( sport = :${port} )" 2>/dev/null | sed -n 's/.*pid=\([0-9][0-9]*\).*/\1/p' | head -n1
+    return
+  fi
+  if command -v lsof >/dev/null 2>&1; then
+    lsof -tiTCP:"${port}" -sTCP:LISTEN 2>/dev/null | head -n1
+  fi
+}
+
 check_web_endpoint() {
+  if [[ "${WEB_ENABLED}" != "true" ]]; then
+    info "Web service disabled by WEB_ENABLED=false; skipping web endpoint checks"
+    return
+  fi
+
+  local listener_pid expected_script code
+  listener_pid="$(listener_pid_for_port "${WEB_PORT}")"
+  if [[ -z "${listener_pid}" ]]; then
+    fail "Web port ${WEB_PORT} is not listening"
+    return
+  fi
+
+  expected_script="${DEPLOY_ROOT}/web/app.py"
+  if [[ ! -r "/proc/${listener_pid}/cmdline" ]]; then
+    fail "Unable to inspect listener on WEB_PORT=${WEB_PORT}"
+    return
+  fi
+  if ! tr '\0' ' ' <"/proc/${listener_pid}/cmdline" | grep -Fq "${expected_script}"; then
+    fail "WEB_PORT=${WEB_PORT} is owned by a non-project process (pid=${listener_pid})"
+    return
+  fi
+
   local code
   code="$(http_code "${WEB_URL}")"
   if [[ "${code}" == "200" ]]; then
     ok "Web endpoint reachable: ${WEB_URL}"
-  elif [[ "${code}" == "000" || -z "${code}" ]]; then
-    warn "Web endpoint unreachable: ${WEB_URL} (web module may be intentionally disabled)"
   else
-    warn "Web endpoint returned HTTP ${code}: ${WEB_URL}"
+    fail "Web endpoint check failed: ${WEB_URL} (HTTP ${code:-N/A})"
   fi
 }
 
@@ -357,6 +468,10 @@ check_systemd_units() {
 
   local unit state
   for unit in media-server.service media-web.service; do
+    if [[ "${unit}" == "media-web.service" && "${WEB_ENABLED}" != "true" ]]; then
+      info "Web service disabled by WEB_ENABLED=false; skip active-state requirement for ${unit}"
+      continue
+    fi
     state="$(systemctl is-active "${unit}" 2>/dev/null || true)"
     if [[ "${state}" == "active" ]]; then
       ok "systemd unit active: ${unit}"
@@ -378,6 +493,10 @@ check_systemd_execstart() {
   local expected unit unit_text
   expected="${DEPLOY_ROOT}/.venv/bin/python"
   for unit in media-server.service media-web.service; do
+    if [[ "${unit}" == "media-web.service" && "${WEB_ENABLED}" != "true" ]]; then
+      info "Web service disabled by WEB_ENABLED=false; skip ExecStart validation for ${unit}"
+      continue
+    fi
     if ! systemctl list-unit-files "${unit}" --no-legend 2>/dev/null | grep -q "^${unit}"; then
       continue
     fi
@@ -396,6 +515,47 @@ check_systemd_execstart() {
   done
 }
 
+check_media_server_unit_limits() {
+  if ! command -v systemctl >/dev/null 2>&1; then
+    return
+  fi
+  if ! systemctl list-unit-files "media-server.service" --no-legend 2>/dev/null | grep -q "^media-server.service"; then
+    warn "media-server.service not installed, skip runtime limit checks"
+    return
+  fi
+
+  local unit_text
+  unit_text="$(systemctl cat media-server.service 2>/dev/null || true)"
+  if [[ -z "${unit_text}" ]]; then
+    warn "Unable to inspect media-server.service for runtime limit checks"
+    return
+  fi
+
+  if printf "%s\n" "${unit_text}" | grep -Fq "RestartSec=10"; then
+    ok "media-server.service RestartSec is tuned for low-write retry pacing"
+  else
+    fail "media-server.service RestartSec is not set to 10"
+  fi
+
+  if printf "%s\n" "${unit_text}" | grep -Fq "Nice=10"; then
+    ok "media-server.service Nice is lowered"
+  else
+    fail "media-server.service Nice is not set to 10"
+  fi
+
+  if printf "%s\n" "${unit_text}" | grep -Fq "IOSchedulingClass=best-effort"; then
+    ok "media-server.service IOSchedulingClass is best-effort"
+  else
+    fail "media-server.service IOSchedulingClass is not best-effort"
+  fi
+
+  if printf "%s\n" "${unit_text}" | grep -Fq "IOSchedulingPriority=7"; then
+    ok "media-server.service IOSchedulingPriority is lowered"
+  else
+    fail "media-server.service IOSchedulingPriority is not set to 7"
+  fi
+}
+
 info "Checking required commands"
 require_cmd python3
 require_cmd curl
@@ -408,6 +568,7 @@ info "Checking Python runtime"
 check_python_version
 check_uv_command
 check_python_modules
+check_log_level_default
 
 info "Checking Docker runtime"
 check_docker_runtime
@@ -415,6 +576,7 @@ check_minio_container_hint
 
 info "Checking service responses"
 check_minio_health
+check_minio_data_access
 check_media_health
 check_web_endpoint
 check_sts_quickcheck
@@ -422,6 +584,7 @@ check_sts_quickcheck
 info "Checking systemd deployment status"
 check_systemd_units
 check_systemd_execstart
+check_media_server_unit_limits
 
 say ""
 info "Summary: pass=${PASS_COUNT}, warn=${WARN_COUNT}, fail=${FAIL_COUNT}"

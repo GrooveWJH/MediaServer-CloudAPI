@@ -14,6 +14,8 @@ warn() { say "${YELLOW}WARN${RESET} $1"; }
 err() { say "${RED}ERR${RESET} $1"; }
 info() { say "${BLUE}INFO${RESET} $1"; }
 
+ENABLE_WEB="false"
+
 require_sudo() {
   if ! sudo -v; then
     err "sudo privileges required"
@@ -62,6 +64,17 @@ require_cmd_or_exit() {
   fi
 }
 
+usage() {
+  cat <<'USAGE'
+Usage:
+  ./deploy/setup.sh [--enable-web]
+
+Options:
+  --enable-web  Install and start media-web.service on WEB_PORT
+  -h, --help    Show this help
+USAGE
+}
+
 ensure_uv_installed() {
   local user_name="$1"
   local user_home="$2"
@@ -81,6 +94,34 @@ ensure_uv_installed() {
   ok "Installed uv for ${user_name}"
 }
 
+repair_or_reset_venv() {
+  local target_root="$1"
+  local user_name="$2"
+  local venv_root="${target_root}/.venv"
+  local venv_python3="${venv_root}/bin/python3"
+
+  if [[ ! -e "${venv_root}" ]]; then
+    return
+  fi
+
+  info "Checking existing virtual environment at ${venv_root}"
+  sudo chown -R "${user_name}:${user_name}" "${target_root}/.venv" || true
+
+  if sudo -u "${user_name}" -H env VENV_ROOT="${venv_root}" VENV_PYTHON3="${venv_python3}" bash -lc '
+    [[ -d "${VENV_ROOT}" ]] || exit 1
+    if [[ -e "${VENV_PYTHON3}" ]]; then
+      readlink -f "${VENV_PYTHON3}" >/dev/null
+    else
+      find "${VENV_ROOT}" -maxdepth 2 -mindepth 1 >/dev/null
+    fi
+  '; then
+    return
+  fi
+
+  warn "stale virtual environment is not accessible; recreating ${venv_root}"
+  sudo rm -rf "${target_root}/.venv"
+}
+
 prepare_python_runtime() {
   local target_root="$1"
   local user_name="$2"
@@ -94,6 +135,7 @@ prepare_python_runtime() {
   fi
   require_cmd_or_exit curl
   ensure_uv_installed "${user_name}" "${user_home}"
+  repair_or_reset_venv "${target_root}" "${user_name}"
 
   info "Syncing Python dependencies with uv"
   sudo -u "${user_name}" -H env PATH="${user_path}" UV_PROJECT_ENVIRONMENT="${target_root}/.venv" \
@@ -125,6 +167,18 @@ wait_for_minio() {
   return 1
 }
 
+mc_container_prefix() {
+  local endpoint="$1"
+  local mc_config_dir="$2"
+  local -a args=(sudo docker run --rm -v "${mc_config_dir}:/root/.mc")
+  case "${endpoint}" in
+    http://127.0.0.1:*|https://127.0.0.1:*|http://localhost:*|https://localhost:*)
+      args+=(--network host)
+      ;;
+  esac
+  printf '%s\n' "${args[@]}"
+}
+
 ensure_bucket() {
   local endpoint="$1"
   local access_key="$2"
@@ -133,6 +187,7 @@ ensure_bucket() {
   local mc_config_dir="$5"
   local retries=10
   local wait_sec=2
+  local -a mc_cmd=()
 
   info "Ensuring bucket exists: ${bucket}"
   if ! docker image inspect minio/mc:latest >/dev/null 2>&1; then
@@ -141,16 +196,61 @@ ensure_bucket() {
   fi
 
   sudo mkdir -p "${mc_config_dir}"
+  mapfile -t mc_cmd < <(mc_container_prefix "${endpoint}" "${mc_config_dir}")
   for _ in $(seq 1 "${retries}"); do
-    if sudo docker run --rm -v "${mc_config_dir}:/root/.mc" minio/mc \
+    if "${mc_cmd[@]}" minio/mc \
       alias set local "${endpoint}" "${access_key}" "${secret_key}" >/dev/null 2>&1 \
-      && sudo docker run --rm -v "${mc_config_dir}:/root/.mc" minio/mc \
+      && "${mc_cmd[@]}" minio/mc \
       mb --ignore-existing "local/${bucket}" >/dev/null 2>&1; then
       return 0
     fi
     sleep "${wait_sec}"
   done
   return 1
+}
+
+check_port_available() {
+  local port="$1"
+  if command -v ss >/dev/null 2>&1 && ss -lnt "( sport = :${port} )" 2>/dev/null | grep -q LISTEN; then
+    err "port ${port} is already in use"
+    exit 1
+  fi
+  if command -v lsof >/dev/null 2>&1 && lsof -iTCP:"${port}" -sTCP:LISTEN >/dev/null 2>&1; then
+    err "port ${port} is already in use"
+    exit 1
+  fi
+}
+
+verify_minio_access() {
+  local endpoint="$1"
+  local access_key="$2"
+  local secret_key="$3"
+  local bucket="$4"
+  local mc_config_dir="$5"
+  local -a mc_cmd=()
+
+  info "Verifying MinIO IAM and bucket access"
+  mapfile -t mc_cmd < <(mc_container_prefix "${endpoint}" "${mc_config_dir}")
+  if ! "${mc_cmd[@]}" minio/mc \
+    alias set local "${endpoint}" "${access_key}" "${secret_key}" >/dev/null 2>&1; then
+    err "failed to configure MinIO client alias"
+    exit 1
+  fi
+
+  if ! "${mc_cmd[@]}" minio/mc \
+    admin info local >/dev/null 2>&1; then
+    err "MinIO admin API is not healthy enough for IAM access"
+    exit 1
+  fi
+
+  if ! "${mc_cmd[@]}" minio/mc \
+    ls "local/${bucket}" >/dev/null 2>&1; then
+    err "MinIO bucket access failed for ${bucket}"
+    exit 1
+  fi
+
+  ok "MinIO IAM/API access OK"
+  ok "MinIO bucket access OK"
 }
 
 print_summary() {
@@ -231,7 +331,9 @@ install_or_update() {
   local storage_sts_role_arn="arn:aws:iam::minio:role/dji-pilot"
   local storage_sts_policy=""
   local storage_sts_duration="3600"
-  local log_level="debug"
+  local log_level="warning"
+  local web_enabled="${ENABLE_WEB}"
+  local web_port="8088"
   local actions=()
 
   info "Preparing directories"
@@ -243,9 +345,17 @@ install_or_update() {
   remove_systemd_units
   actions+=("reinstalled systemd units")
 
+  if [[ -f "${target_root}/deploy/docker-compose.yml" ]]; then
+    info "Stopping docker compose before syncing repository"
+    sudo docker compose -f "${target_root}/deploy/docker-compose.yml" down >/dev/null 2>&1 || true
+    actions+=("docker compose down before sync")
+  fi
+
   info "Syncing repository to ${target_root}"
   sudo rsync -a --delete \
     --exclude '.venv/' \
+    --exclude 'deploy/minio-data/' \
+    --exclude 'deploy/.mc/' \
     --exclude '__pycache__/' \
     --exclude '*.pyc' \
     "${repo_root}/" "${target_root}/"
@@ -276,7 +386,8 @@ STORAGE_STS_DURATION=${storage_sts_duration}
 DB_PATH=/opt/mediaserver/data/media.db
 LOG_LEVEL=${log_level}
 
-WEB_PORT=8088
+WEB_ENABLED=${web_enabled}
+WEB_PORT=${web_port}
 EOF
   actions+=("wrote ${target_root}/deploy/media-server.env")
   ok "STORAGE_ENDPOINT set to ${storage_endpoint_internal}"
@@ -329,26 +440,58 @@ EOF
   if wait_for_minio "${STORAGE_ENDPOINT}"; then
     if ensure_bucket "${STORAGE_ENDPOINT}" "${STORAGE_ACCESS_KEY}" "${STORAGE_SECRET_KEY}" "${STORAGE_BUCKET}" "${target_root}/deploy/.mc"; then
       actions+=("created bucket ${STORAGE_BUCKET} (if missing)")
+      verify_minio_access "${STORAGE_ENDPOINT}" "${STORAGE_ACCESS_KEY}" "${STORAGE_SECRET_KEY}" "${STORAGE_BUCKET}" "${target_root}/deploy/.mc"
+      actions+=("verified MinIO IAM and bucket access")
     else
-      warn "Bucket init failed after retries; continue (compose minio-init may still create bucket)"
-      actions+=("skipped bucket creation (mc alias/mb failed)")
+      err "Bucket init failed after retries"
+      exit 1
     fi
   else
-    warn "MinIO not ready; skipped bucket creation"
-    actions+=("skipped bucket creation (MinIO not ready)")
+    err "MinIO not ready after startup"
+    exit 1
   fi
 
   info "Enabling services"
   sudo systemctl enable --now media-server.service
-  sudo systemctl enable --now media-web.service
-  actions+=("enabled media-server and media-web services")
+  actions+=("enabled media-server service")
+  sudo systemctl enable media-web.service >/dev/null 2>&1 || true
+  if [[ "${web_enabled}" == "true" ]]; then
+    check_port_available "${web_port}"
+    sudo systemctl enable --now media-web.service
+    actions+=("enabled media-web service")
+  else
+    sudo systemctl disable --now media-web.service >/dev/null 2>&1 || true
+    actions+=("installed but left media-web service disabled by default")
+  fi
 
   print_summary actions
-  ok "Done. Media server at :8090, web at :8088, MinIO at :9000/:9001"
+  if [[ "${web_enabled}" == "true" ]]; then
+    ok "Done. Media server at :8090, web at :${web_port}, MinIO at :9000/:9001"
+  else
+    ok "Done. Media server at :8090, web disabled by default, MinIO at :9000/:9001"
+  fi
 }
 
 main() {
   require_sudo
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --enable-web)
+        ENABLE_WEB="true"
+        shift
+        ;;
+      -h|--help)
+        usage
+        exit 0
+        ;;
+      *)
+        err "Unknown argument: $1"
+        usage
+        exit 2
+        ;;
+    esac
+  done
 
   say ""
   say "Choose action:"
